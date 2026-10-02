@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cubebuild"
+version = "0.1.0"
+description = "Construction pipeline for the Solid Earth Data Cube (SEDC) v1.0"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "<to be filled in>" }]
+dependencies = [
+    "dask",
+    "geopandas",
+    "netCDF4",
+    "numpy",
+    "pandas",
+    "pyproj",
+    "PyYAML",
+    "rasterio",
+    "shapely",
+    "xarray",
+    "zarr",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+cubebuild = "cubebuild.cli:main"
+
+[tool.setuptools]
+packages = ["cubebuild"]
+
+[tool.setuptools.package-data]
+cubebuild = ["layer-mapping-v0.yaml"]

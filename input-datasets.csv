@@ -1,0 +1,46 @@
+# SEDC v1.0 input dataset list.
+#
+# Scope: the 22 source datasets that form the SEDC v1.0 source baseline - the
+# construction inputs of the data cube plus the reference datasets held for
+# cross-checking. Two further collected datasets are out of scope, not consumed
+# by the build and therefore not listed:
+#   id 12 GVP Volcano List - its terms of use permit non-commercial use only;
+#   id 26 1.8 Ga tectonic reconstruction model - no licence on the data files,
+#   and the associated article is CC BY-NC-ND 4.0.
+#
+# Four listed datasets carry licence terms that restrict redistribution - id 2
+# WGM2012, id 8 GSRM v2.2, id 9 GEM Global Active Faults and id 16 Global
+# Basins. They are part of the full version only: their layers are not included
+# in the public release, and some layers of other listed datasets are excluded
+# as well. Per-dataset public-release exclusions and access notes are given in
+# the SEDC v1.0 manuscript.
+#
+# The list is derived from the project's data catalogue and records only the
+# fields below; project process records and annotations are not included. ids
+# are stable catalogue identifiers (retired numbers are intentionally absent).
+# doi is the identifier to cite for the source dataset; where no DOI exists, a
+# citation form is given. licence states the licence basis of the source
+# distribution. Lines beginning with '#' are comments.
+id,name,doi,licence,format
+1,ETOPO 2022 Bedrock,10.25921/fd45-gt74,NOAA public distribution,GeoTIFF
+2,WGM2012 Bouguer anomaly,10.18168/bgi.23,BGI terms of use restrict it to non-commercial use and prohibit inclusion in commercial databases,GMT netCDF grid
+3,EMAG2v3,10.7289/V5H70CVX,NOAA public distribution,GeoTIFF
+4,GLAD-M35,10.1093/gji/ggae270,independent distribution without a licence statement (paper OA does not extend to it),netCDF
+5,SEMUCB-WM1,10.1093/gji/ggu334,source/viz distribution without an explicit licence,netCDF
+6,HFgrid14 and NGHF; GHFDB R2024,10.1029/2019GC008389; 10.5880/fidgeo.2024.014,HFgrid14 and NGHF: SI without an explicit redistribution licence; GHFDB R2024: CC BY 4.0,CSV/TXT
+7,World Stress Map 2025,10.5880/WSM.2025.001,WSM public distribution,CSV
+8,GSRM v2.2,10.1002/2014GC005407,CC BY-NC-SA 3.0 in the distributed file headers (GEM Foundation),GMT ASCII
+9,GEM Global Active Faults,10.1177/8755293020944182,repository LICENSE.txt is CC BY-SA 4.0,GeoPackage
+10,PB2002,10.1029/2001GC000252,no explicit licence at the source,dig ASCII + xls
+11,Slab2,10.5066/F7PV6JNV,ScienceBase public distribution,GMT grid
+13,GST-1,10.1016/j.tecto.2026.231175,no explicit licence at the source,XYZ ASCII
+14,GlobSed v3,10.25921/xs0z-z845,no licence basis stated,netCDF/ASCII grid
+15,GUM v1.0,10.1594/PANGAEA.884822,PANGAEA CC BY 3.0,Shapefile
+16,Global Basins,10.1016/j.earscirev.2021.103564,journal supplementary material CC BY-NC-ND 4.0,Shapefile
+19,GEMMA; CRUST1.0,10.1016/j.jag.2014.04.002; EGU2013-2658 (abstract),GEMMA: official WPS distribution without explicit licence terms (gocedata.como.polimi.it); the authors state it is freely available; CRUST1.0: no licence basis stated,XYZ ASCII + GeoTIFF
+20,LITHO1.0,10.1002/2013JB010626,CC BY 4.0,netCDF
+21,Mooney 2023 crustal age provinces,10.1016/j.earscirev.2023.104493,CC BY 4.0,Shapefile
+22,Seton 2020 seafloor age,10.1029/2020GC009214,EarthByte GPlates GeoData public distribution,netCDF
+23,global_tectonics geological provinces,10.5281/zenodo.6586972,Zenodo v1 CC BY 4.0 (the version declared in the paper),Shapefile + GeoTIFF
+24,GLiM (including LiMW),10.1594/PANGAEA.788537,GLiM raster PANGAEA CC BY 3.0; LiMW: no redistribution licence stated,ASCII grid + FileGDB
+25,PaleoDEM,10.5281/zenodo.5460860,License.txt CC BY 4.0,netCDF

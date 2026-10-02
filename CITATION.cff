@@ -1,0 +1,25 @@
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the metadata below."
+title: "cubebuild: construction pipeline for the Solid Earth Data Cube (SEDC) v1.0"
+abstract: >-
+  Construction pipeline for the Solid Earth Data Cube (SEDC) v1.0. It consumes
+  a declarative layer contract and builds a tiered Zarr v3 store, the vector
+  sidecars, a machine-readable manifest and structural validation reports.
+  This is the software; the cube data are released separately.
+version: "0.1.0"
+license: MIT
+notes: >-
+  The code in this repository is licensed under MIT. The public data cube
+  release is licensed separately under CC BY 4.0.
+repository-code: "https://github.com/w-r-b/cubebuild"
+doi: "<to be registered>"
+authors:
+  - family-names: "<to be filled in>"
+    given-names: "<to be filled in>"
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "<to be filled in>"
+keywords:
+  - solid Earth
+  - data cube
+  - Zarr
+  - reproducibility

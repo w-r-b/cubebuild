@@ -1,0 +1,571 @@
+# ============================================================
+# layer-mapping-v0.yaml — 立方规范核心制品：数据集 → 立方层映射
+# 本表为管线的声明式规格：构建只消费这里解析出的条目，不做自由裁量；
+# 条目的 visibility 决定其是否纳入公开版数据立方（internal = 仅自用构建）。
+# ============================================================
+
+version: 1.0
+status: locked
+
+tiers: [1deg, 30min, 6min, 3min, 30sec]
+tier_deg: {1deg: 1.0, 30min: 0.5, 6min: 0.1, 3min: 0.05, 30sec: 0.0083333}
+
+rules_applied:  # 本表执行的全部规则
+  home_tier: 主档 = 不细于原生分辨率的最细档
+  full_set_tier: 1deg 为全集档，所有层汇入
+  kernels: 连续=面积加权保守平均；类别=众数；角度=循环统计；计数=求和
+  axial: 轴向角度数据（如 Slab2 strike，0–180°）按 2θ 变换循环统计，不用 360° 循环
+  vector: 稀疏矢量要素 = 类别层 + 距离场双通道；穷尽覆盖型多边形豁免距离场
+  distance: 距离场逐档从矢量源精确重算（球面大圆距离，km），不跨档降采样
+  points: 原始点进矢量侧车；立方只进点密度层，不自行插值；点密度层档位上限 3min
+  missing: 浮点层 NaN + 关键层 uint8 有效性掩膜 + 陆海掩膜 + 注册表记覆盖率
+  crs: EPSG:4326 存储 + 像元面积权重层
+  derived: 派生层只收确定性几何派生（距离场/坡度/起伏度/陆海掩膜/面积权重），逐档从源重算
+  restraint: 克制原则：同类产品只提供一种——筛选留一或综合为一；互补信息保留；不是完全不动
+  visibility: 默认 public；internal = 仅自用构建，不纳入公开版
+
+layers:
+
+  # ---------------- topography ----------------
+  - id: topography__bedrock_elevation
+    source: etopo2022-bed（62 tiles，bed 基岩/冰下版本）
+    native_res: 15sec
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: float32
+    unit: m
+    resampling: conservative_area_weighted
+    mask: 全球全覆盖，免有效性掩膜
+    notes: 无 ice-surface 版本，对地质立方是正确选择
+
+  # ---------------- gravity ----------------
+  - id: gravity__wgm2012_bouguer
+    source: bouguer-wgm2012
+    native_res: 2min
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: mGal
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: BGI Terms 实质 NC；公开版不发布，论文建议读者向 BGI 联用
+
+  # ---------------- magnetics ----------------
+  - id: magnetics__emag2_sealevel
+    source: emag2-v3（*_Sealevel.tif）
+    native_res: 2min
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: nT
+    resampling: conservative_area_weighted
+    mask: validity
+    notes: 克制原则：上延版转验证参考（同一产品的另一个处理级，见 validation_reference）；官方栅格无 CRS 标签，配准时显式指定 EPSG:4326
+
+  # ---------------- seismology：只收 3D 节点，取消 2D 切片 ----------------
+  - id: seismology__gladm35_vsv
+    source: glad-m35
+    native_res: 1deg
+    dims: [depth, lat, lon]   # 289 深度层全保留
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km/s
+    resampling: none（原生 1° 即全集档）
+    mask: validity
+    visibility: internal
+    notes: 模型 nc 经 EMC/OneDrive/GitHub 独立分发且无许可声明，论文 OA 许可不覆盖独立分发的数据文件；不纳入公开版
+  - id: seismology__gladm35_vsh
+    source: glad-m35
+    native_res: 1deg
+    dims: [depth, lat, lon]
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km/s
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: 同 gladm35_vsv
+  - id: seismology__gladm35_vpv
+    source: glad-m35
+    native_res: 1deg
+    dims: [depth, lat, lon]
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km/s
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: 同 gladm35_vsv
+  - id: seismology__gladm35_vph
+    source: glad-m35
+    native_res: 1deg
+    dims: [depth, lat, lon]
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km/s
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: 同 gladm35_vsv
+  - id: seismology__gladm35_eta
+    source: glad-m35
+    native_res: 1deg
+    dims: [depth, lat, lon]
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: dimensionless
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: 同 gladm35_vsv
+  - id: seismology__semucb_vs
+    source: semucb-wm1
+    native_res: 1deg
+    dims: [depth, lat, lon]   # 74 深度层，全地幔至 CMB
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km/s
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: 源无明示许可（viz-only nc + 源码分发；2014 论文为订阅时代，HAL 自存档 CC BY 仅覆盖文稿不传导数据）；不纳入公开版
+  - id: seismology__semucb_xi
+    source: semucb-wm1
+    native_res: 1deg
+    dims: [depth, lat, lon]
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: dimensionless（径向各向异性 ξ）
+    resampling: none
+    mask: validity
+    visibility: internal
+    notes: GLAD-M35 与 SEMUCB 上地幔段重叠是有意保留（独立方法=模型不确定性特征，克制原则互补豁免）；同 semucb_vs
+
+  # ---------------- thermal ----------------
+  - id: thermal__hfgrid14_heatflow
+    source: heatflow（lucazeau2019/HFgrid14.csv）
+    native_res: 0.5deg
+    home_tier: 30min
+    tiers: [1deg, 30min]
+    dtype: float32
+    unit: mW/m2
+    resampling: conservative_area_weighted
+    mask: validity + landsea
+    visibility: internal
+    notes: 作者官方预测网格（模型产品，非观测），元数据标 model；与密度层互补非冗余；源（Lucazeau 2019 补充材料）无明示再分发许可，不纳入公开版
+  - id: thermal__heatflow_density
+    source: heatflow（GHFDB 2024 与 NGHF 合并去重后的单一点集）
+    native_res: point
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint32
+    unit: count/cell
+    resampling: sum
+    mask: 免（0 即无观测，语义自明）
+    notes: 克制原则综合为一——dedup 规则：以 GHFDB 为主，NGHF 仅补不与任何 GHFDB 记录同落 0.1° 像元的点；构建期核实 GHFDB 是否已整编 NGHF，若已整编则 NGHF 整体转验证参考；聚合统计层为不可恢复源记录的分析产物（非内容再分发），维持公开
+
+  # ---------------- stress-kinematics ----------------
+  - id: stress_kinematics__wsm_density
+    source: wsm2025-stress（100842 条记录）
+    native_res: point
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint32
+    unit: count/cell
+    resampling: sum
+    mask: 免
+    notes: 单层总密度；应力方向/机制/质量分级留 sidecar（不插值）
+  - id: stress_kinematics__gsrm_exx
+    source: gsrm-strain（v2.2/GSRM_strain.txt.Z 解压，全球 0.1° 网格，6305376 行）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: nano-strain/yr
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: 文件头 GEM Foundation CC-BY-NC-SA 3.0，不纳入公开版（论文建议读者自行联用）；构建用 v2.2，注册表记 strain=v2.2；e1/e2/azi_e1 不收——特征分解是确定性代数运算，下游可由三分量自算；RL-NLC/LL-NLC 源未给语义定义不收；解压版 6305376 行=25 头+6300000 完整 0.1° 网格行+5351 行尾部离格块（v2.2 构建残留，剔除不入立方，剔除量读取期契约化）；单位 README 自证 units are 1e-9/yr（文件头无单位行）
+  - id: stress_kinematics__gsrm_eyy
+    source: gsrm-strain（v2.2/GSRM_strain.txt.Z 解压）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: nano-strain/yr
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: 同 gsrm_exx
+  - id: stress_kinematics__gsrm_exy
+    source: gsrm-strain（v2.2/GSRM_strain.txt.Z 解压）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: nano-strain/yr
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: 同 gsrm_exx
+  - id: stress_kinematics__gsrm_vorticity
+    source: gsrm-strain（v2.2/GSRM_strain.txt.Z 解压，vorticity 列）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: nano-rad/yr
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: 同 gsrm_exx；e1/e2/azi_e1 不收——特征分解是确定性代数运算，下游可由三分量自算
+  - id: stress_kinematics__gsrm_gps_density
+    source: gsrm-strain（GPS_ITRF08.gmt，观测站点速度，psvelo 格式按 study 一行一站）
+    native_res: point
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint32
+    unit: count/cell
+    resampling: sum
+    mask: 免
+    visibility: internal
+    notes: 同 gsrm_exx；观测站点速度=GPS_*.gmt（53 个参考系，同站跨系重复，仅速度值随参考系旋转不同），密度层只取 ITRF08 单参考系计数，不跨 53 系重复计数；vel_*.gmt（165 个）为模型速度网格场（0.1°/1°/5°）非站点数据；GPS_*.gmt 版本归属未声明（v2.2 目录仅含 strain 两文件），注册表登记版本归属未定；GSRM_WUS_0.02.txt 为区域加密产品，v1 不收
+  - id: stress_kinematics__gem_fault_slip_class
+    source: gem-active-faults（harmonized gpkg，13696 断裂）
+    native_res: vector-line
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: uint8
+    unit: category（slip_type：正断/逆断/走滑等）
+    resampling: mode
+    mask: validity
+    visibility: internal
+    notes: GEM GAF-DB 仓库 LICENSE.txt 为 CC BY-SA 4.0（SA 条款不符合开放许可要求），不纳入公开版，论文建议读者直接使用 GEM GAF-DB；slip_type 缺失 319 条不参与栅格化（距离场仍计入）
+  - id: stress_kinematics__gem_fault_distance
+    source: gem-active-faults
+    native_res: vector-line
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: float32
+    unit: km（球面大圆距离）
+    resampling: none（逐档从矢量源精确重算）
+    mask: 免（距离场全域有值）
+    visibility: internal
+    notes: 同 slip_class（CC BY-SA 4.0，不纳入公开版）；逐档精确重算经层级环带候选剪枝（数学引理保证不漏候选），保真以独立航空公式抽样比对
+  - id: stress_kinematics__pb2002_plate_id
+    source: pb2002-plate-boundaries（52 板块多边形）
+    native_res: vector-polygon
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: uint8
+    unit: category（52 板块）
+    resampling: mode
+    mask: 免（全球覆盖）
+    visibility: internal
+    notes: 穷尽覆盖型，豁免距离场；板块距离由 boundary_distance 承担；源无明示许可，不纳入公开版
+  - id: stress_kinematics__pb2002_zone_class
+    source: pb2002-plate-boundaries（PB2002_tectonic_zones.grd.txt）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: uint8
+    unit: category（造山带/构造区分类）
+    resampling: mode
+    mask: validity
+    visibility: internal
+    notes: 非标准 ASCII 网格，GDAL 不认，需 numpy 手工解析；同 pb2002_plate_id
+  - id: stress_kinematics__pb2002_boundary_distance
+    source: pb2002-plate-boundaries（边界线段）
+    native_res: vector-line
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: km（球面大圆距离）
+    resampling: none（逐档从矢量源精确重算）
+    mask: 免
+    visibility: internal
+    notes: 同 pb2002_plate_id
+  # ---- Slab2：27 带合并为全球层 ----
+  - id: stress_kinematics__slab2_depth
+    source: slab2（27 俯冲带 × dep）
+    native_res: 0.05deg（分区网格）
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: km（正值向下）
+    resampling: conservative_area_weighted
+    mask: NaN（板片区外）+ validity
+    notes: 合并规则：重叠像元取 depth 最浅者所属分区的值；构建时先统计重叠像元总量并回报
+  - id: stress_kinematics__slab2_dip
+    source: slab2（27 带 × dip）
+    native_res: 0.05deg
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: degree（0–90）
+    resampling: conservative_area_weighted
+    mask: NaN + validity
+  - id: stress_kinematics__slab2_strike
+    source: slab2（27 带 × str）
+    native_res: 0.05deg
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: degree（0–180，轴向数据）
+    resampling: circular_axial（2θ 变换循环统计；走向无方向性，不用 360° 循环）
+    mask: NaN + validity
+  - id: stress_kinematics__slab2_thickness
+    source: slab2（27 带 × thk）
+    native_res: 0.05deg
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: km
+    resampling: conservative_area_weighted
+    mask: NaN + validity
+  - id: stress_kinematics__slab2_uncertainty
+    source: slab2（27 带 × unc）
+    native_res: 0.05deg
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: km
+    resampling: conservative_area_weighted
+    mask: NaN + validity
+  - id: stress_kinematics__slab2_overlap_mask
+    source: slab2（合并时派生）
+    native_res: 0.05deg
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint8
+    unit: count（覆盖该像元的分区数）
+    resampling: sum
+    mask: 免
+
+  # ---------------- sediment ----------------
+  - id: sediment__gst1_thickness
+    source: gst1（Bird & Mooney 2026，GST14_WGS84.XYZ）
+    native_res: 0.125deg
+    home_tier: 30min   # 6min(0.1°) 细于原生 0.125°，铁律禁止进入
+    tiers: [1deg, 30min]
+    dtype: float32
+    unit: m   # 单位以源文件头核实（meter，登记 unit_basis）
+    resampling: conservative_area_weighted
+    mask: validity
+    visibility: internal
+    notes: 克制原则筛选留一——立方唯一沉积厚度层；GlobSed/CRUST1.0 沉积层转验证参考；源无明示许可，不纳入公开版
+  - id: sediment__gum_lithology_class
+    source: gum-unconsolidated（911551 多边形）
+    native_res: vector-polygon
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: uint8
+    unit: category（未固结沉积物岩性分级）
+    resampling: mode
+    mask: validity + landsea（陆域层）
+    notes: 穷尽覆盖型，豁免距离场
+  - id: sediment__gum_thickness_class
+    source: gum-unconsolidated
+    native_res: vector-polygon
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: uint8
+    unit: category（厚度分级，有序）
+    resampling: mode
+    mask: validity + landsea
+    notes: 穷尽覆盖型，豁免距离场；有序类别仍按众数降采样，保序聚合留给下游
+  - id: sediment__global_basins_class
+    source: global-basins（764 盆地多边形）
+    native_res: vector-polygon
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint8
+    unit: category（盆地类型）
+    resampling: mode
+    mask: validity
+    visibility: internal
+    notes: 源许可 CC BY-NC-ND（ND 限衍生再分发），不纳入公开版
+  - id: sediment__global_basins_distance
+    source: global-basins
+    native_res: vector-polygon
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: float32
+    unit: km（球面大圆距离）
+    resampling: none（逐档从矢量源精确重算）
+    mask: 免
+    visibility: internal
+    notes: 区域距离语义——域内（胞心落盆地片）= 0，域外 = 到最近盆地边界球面大圆距离；逐档从矢量源精确重算；源许可 CC BY-NC-ND（ND 限衍生再分发），不纳入公开版
+
+  # ---------------- lithosphere ----------------
+  - id: lithosphere__gemma_moho
+    source: crust-models（ecm1-gemma/crust_bottom.tif，GEMMA 输出）
+    native_res: 0.5deg
+    home_tier: 30min
+    tiers: [1deg, 30min]
+    dtype: float32
+    unit: km（海平面为 0，负值向下）
+    resampling: conservative_area_weighted
+    mask: validity
+    notes: 克制原则筛选留一——立方唯一 Moho 层；CRUST1.0 壳厚/Moho 转验证参考
+  - id: lithosphere__gemma_moho_err
+    source: crust-models（ecm1-gemma/crust_moho_err.tif）
+    native_res: 0.5deg
+    home_tier: 30min
+    tiers: [1deg, 30min]
+    dtype: float32
+    unit: km
+    resampling: conservative_area_weighted
+    mask: validity
+    notes: 误差层供 ML 不确定性加权
+  - id: lithosphere__gemma_basement_depth
+    source: crust-models（ecm1-gemma/crust_top.tif，GEMMA 结晶基底面）
+    native_res: 0.5deg
+    home_tier: 30min
+    tiers: [1deg, 30min]
+    dtype: float32
+    unit: km（海平面为 0，负值向下）
+    resampling: conservative_area_weighted
+    mask: validity
+    notes: 实证=结晶基底面（min −21km 排除高程解释 + GEMMA 论文定义）；结晶地壳厚度=Moho−基底，下游一行减法可得
+  - id: lithosphere__litho1_lab
+    source: litho1（LITHO1.0 nc，软流圈顶界深度）
+    native_res: 1deg
+    home_tier: 1deg
+    tiers: [1deg]
+    dtype: float32
+    unit: km
+    resampling: none
+    mask: validity
+    notes: v1 先收 LAB；密度/vp/vs 等其余变量留后续版本
+  - id: lithosphere__crustal_age_class
+    source: crustal-age-mooney2023（6 时代类别多边形）
+    native_res: vector-polygon
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint8
+    unit: category（ARC/PAP/MES/MCE/PAL/NEO 构造稳定化时代，非出露地层时代）
+    resampling: mode
+    mask: validity + landsea（大陆层）
+    notes: 穷尽覆盖型，豁免距离场；与 Seton 洋龄覆盖域互补（陆/海）
+  - id: lithosphere__seafloor_age
+    source: seafloor-age-seton2020（Seafloor_Age_Grid/Seton_etal_2020_PresentDay_AgeGrid.nc）
+    native_res: 0.1deg
+    home_tier: 6min
+    tiers: [1deg, 30min, 6min]
+    dtype: float32
+    unit: Ma
+    resampling: conservative_area_weighted
+    mask: validity + landsea（海洋层）
+    notes: 源仅提供现今网格（已核实）
+  - id: lithosphere__hasterok_province_class
+    source: tectonic-provinces（global_gprv.shp，914 多边形，main 版）
+    native_res: vector-polygon
+    home_tier: 3min
+    tiers: [1deg, 30min, 6min, 3min]
+    dtype: uint8
+    unit: category（一级分类）
+    resampling: mode
+    mask: validity
+    notes: 穷尽覆盖型，豁免距离场；raster_data 5 个第三方 tif 不收
+  - id: lithosphere__glim_lithology_class
+    source: glim-lithology（glim_wgs84_0point5deg.txt.asc）
+    native_res: 0.5deg
+    home_tier: 30min
+    tiers: [1deg, 30min]
+    dtype: uint8
+    unit: category（GLiM 一级岩性，~16 类）
+    resampling: mode
+    mask: validity + landsea（陆域层）
+    notes: 与 GUM 语义不同（全岩性 vs 未固结层），克制原则互补保留；LiMW 只进 sidecar（不栅格化）；源许可 PANGAEA CC BY 3.0
+
+  # ---------------- paleo ----------------
+  - id: paleo__paleodem_elevation
+    source: paleodem-scotese（paleodem-6min-nc/*.nc 109 片；paleodem-1deg-nc/*.nc 109 片）
+    native_res: 6min
+    dims: [time, lat, lon]   # 4D 节点，109 片（0–540Ma）全收
+    home_tier: 6min
+    tiers: [1deg, 6min]
+    dtype: float32
+    unit: m
+    resampling: none（1deg 档直接用官方 1° nc，免降采样）
+    mask: validity（古地理随时间变化，逐时间片掩膜）
+    notes: 抽稀不可逆且存储可承受，故全收；time 轴元数据取文件名 Ma 标签
+
+  # ---------------- derived（四种确定性派生，逐档从源重算）----------------
+  - id: derived__landsea_mask
+    source: 派生自 etopo2022-bed ice-surface（0m 等值线，冰面口径）
+    native_res: 30sec
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: uint8
+    unit: flag（0=海，1=陆）
+    resampling: mode
+    mask: 自身即掩膜
+    notes: 掩膜基于冰面高程（冰盖归陆），与高程层裸地复合口径不同——存在 mask=陆而高程<0 的冰下盆地像元（南极/格陵兰）
+  - id: derived__pixel_area
+    source: 纬度解析公式
+    native_res: exact
+    home_tier: 逐档
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: float32
+    unit: km2
+    resampling: exact_formula（逐档精确计算，不重采样）
+    mask: 免
+    notes: ML 训练面积权重；与计数层配套（count/area=密度）
+  - id: derived__slope
+    source: 派生自 topography__bedrock_elevation
+    native_res: 30sec
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: float32
+    unit: degree
+    resampling: none（逐档从该档高程重算）
+    mask: 随高程层
+    notes: 坡度随尺度变化，逐档重算使每档坡度对应该档尺度语义
+  - id: derived__relief
+    source: 派生自 topography__bedrock_elevation
+    native_res: 30sec
+    home_tier: 30sec
+    tiers: [1deg, 30min, 6min, 3min, 30sec]
+    dtype: float32
+    unit: m
+    resampling: none（逐档从该档高程重算）
+    mask: 随高程层
+    notes: 局部起伏度 = 3×3 移动窗口极差
+
+vectors_sidecar:   # GeoParquet 随立方发布；立方层只收它们的栅格化/计数产物
+  - id: heatflow_points_merged    # GHFDB 2024 + NGHF 合并去重单一点集（含 source 溯源列）；internal（合并集为单一制品，NGHF 记录本体再分发未明示许可）
+  - id: wsm2025_points            # 100842 条（应力方向/机制/质量分级，供角度分析）
+  - id: gsrm_gps_velocities       # GPS_*.gmt 观测站点速度（ITRF08 为主，其余 52 参考系按需） + poles.*（欧拉极表）；internal（同 GSRM 组）；vel_*.gmt 为模型网格场非站点数据
+  - id: gem_active_faults         # 线，13696 断裂；internal（源许可 CC BY-SA 4.0）
+  - id: pb2002_plates             # 52 板块多边形 + 边界段 + poles.xls；internal（源无明示许可）
+  - id: gum_unconsolidated        # 911551 多边形（+火山碎屑 20958）
+  - id: global_basins             # 764 盆地；visibility: internal
+  - id: mooney2023_provinces      # 6 时代类别多边形
+  - id: hasterok_gprv             # 914 构造省多边形
+  - id: limw_polygons             # FileGDB（.gdb 扩展名不可改，GDAL 按扩展名识别）；不栅格化；internal（源许可含商业限制）
+
+validation_reference:   # 克制原则降级：不进立方，进验证体系做交叉核对（术语「验证参考」）
+  - globsed（海洋沉积厚度 5′）        # 与 GST1 海洋段高度同源（GST-1 论文自证），交叉验证 GST1
+  - crust1.0（壳厚/Moho/沉积厚，1°）  # 交叉验证 GEMMA moho/basement 与 GST1；CRUST1.0 不并入立方
+  - emag2-v3 上延版                   # 与海平面版谱一致性检查
+  - gemma 诊断量（crust_cal_par / crust_second_der_eff / crust_Geo_prov / gemma_density_v02.txt）
+  - 验证三元组：gemma_basement_depth + gst1_thickness ≈ bedrock_elevation（物理交叉素材）
+
+not_ingested:   # 这些磁盘内容不进立方也不进验证体系
+  - gvp-volcanoes               # 源条款限非商业，不入库
+  - tectonic-reconstruction-1p8ga  # 许可 CC BY-NC-ND，不入库
+  - GSRM_WUS_0.02.txt           # 区域加密产品，v1 不收
+  - seton2020 Time-dependent raster sequences/   # 实为 MIT-P08 第三方参考（gpml+jpg），非洋龄时间序列
+  - tectonic-provinces raster_data/  # 第三方参考栅格（ETOPO1/洋龄/GGM+/WDMAM/70km S 波）
+  - ecm1 真身（Mooney et al. 2023, earthcrustmodel1.com）  # 本地未收集
+
