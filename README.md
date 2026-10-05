@@ -39,7 +39,7 @@ The full cube cannot be rebuilt from this repository alone. Construction require
 
 ## Data
 
-The public version of SEDC v1.0 is archived on Zenodo as a single tar package (DOI: to be registered). It contains 25 layers in the public Zarr v3 store and 4 vector sidecars. The full cube — 47 layers and 10 vector sidecars — is not publicly released: the redistribution licences of the remaining source datasets are unconfirmed or restrictive.
+The public version of SEDC v1.0 is archived on Zenodo (DOI: [10.5281/zenodo.23098600](https://doi.org/10.5281/zenodo.23098600)) as 25 data parts (21 tar archives of the Zarr store split by tier and latitude / time bands, plus 4 binary parts of the consolidated sediment parquet) together with a `catalog.json` and a sha256 `checksums.txt` file. Reassembly commands are provided in the record. It contains 25 layers in the public Zarr v3 store and 4 vector sidecars. The full cube — 47 layers and 10 vector sidecars — is not publicly released: the redistribution licences of the remaining source datasets are unconfirmed or restrictive.
 
 `input-datasets.csv` lists the input datasets with their sources, DOIs and licences.
 

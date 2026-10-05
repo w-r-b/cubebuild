@@ -14,10 +14,30 @@ notes: >-
 repository-code: "https://github.com/w-r-b/cubebuild"
 doi: "<to be registered>"
 authors:
-  - family-names: "<to be filled in>"
-    given-names: "<to be filled in>"
+  - family-names: Wu
+    given-names: Ruibo
     orcid: "https://orcid.org/<to be filled in>"
-    affiliation: "<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; University of Chinese Academy of Sciences, Beijing 100049, China"
+  - family-names: Zheng
+    given-names: Qingxia
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; University of Chinese Academy of Sciences, Beijing 100049, China"
+  - family-names: Jing
+    given-names: Pengbo
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; University of Chinese Academy of Sciences, Beijing 100049, China"
+  - family-names: Zhao
+    given-names: Guohui
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; Key Laboratory of Mineralization and Exploration of the Upper Yellow River, Ministry of Natural Resources, Lanzhou 730000, China"
+  - family-names: Fan
+    given-names: Qiaohui
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; Key Laboratory of Mineralization and Exploration of the Upper Yellow River, Ministry of Natural Resources, Lanzhou 730000, China"
+  - family-names: Li
+    given-names: Ping
+    orcid: "https://orcid.org/<to be filled in>"
+    affiliation: "State Key Laboratory of Cryospheric Science and Frozen Soil Engineering, Northwest Institute of Eco-Environment and Resources, Chinese Academy of Sciences, Lanzhou 730000, China; Key Laboratory of Petroleum Resources Exploration and Evaluation, Gansu Province, Lanzhou 730000, China; Key Laboratory of Mineralization and Exploration of the Upper Yellow River, Ministry of Natural Resources, Lanzhou 730000, China; Changyi Marine Ecology and Engineering Research Station, Changyi 261300, China"
 keywords:
   - solid Earth
   - data cube
