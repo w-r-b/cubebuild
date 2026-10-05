@@ -26,7 +26,7 @@ DOC = REPO / "submission-compliance-nsd.md"
 REQUIREMENTS = REPO / "submission-requirements-nsd.md"
 # 当前登记的四处待办（与提交要件 §1 前置动作一一对应；任一闭环须显式改本集合）；
 # 题名回改后新增 title → §1 动作 9。
-TODO_KEYS = {"title", "availability", "files", "transactions"}
+TODO_KEYS = {"title"}  # 与对照表现存待办集一致；闭环一项就删一项，禁静默放宽/收紧
 
 
 def _doc() -> str:
@@ -86,7 +86,7 @@ def test_compliance_missing_pointer_detected():
 def test_compliance_todo_requires_registered_action():
     """负例：待办项不指向提交要件（新增未登记待办）→ 命中。"""
     text = _doc()
-    row = _row(text, "files")
+    row = _row(text, "title")   # 当前唯一待办项
     stripped = row.split("|")
     stripped[3] = " 某个未登记的动作 "
     findings = cc.run_checks(text.replace(row, "|".join(stripped), 1))
@@ -94,7 +94,7 @@ def test_compliance_todo_requires_registered_action():
 
 
 def test_compliance_todo_set_is_recorded_state():
-    """待办集合＝登记现状（4 处，含题名回改新增）；闭环后须显式更新本集合（禁静默放宽/收紧）。"""
+    """待办集合＝登记现状（当前仅 `title` 因已知偏差保留）；闭环后须显式更新本集合（禁静默放宽/收紧）。"""
     statuses = {r[0].strip("`"): r[3] for r in cc.parse_rows(_doc())}
     assert {k for k, v in statuses.items() if v == cc.STATUS_TODO} == TODO_KEYS, statuses
     assert set(statuses.values()) <= set(cc.STATUSES)
