@@ -1,7 +1,4 @@
 # ============================================================
-# layer-mapping-v0.yaml — 立方规范核心制品：数据集 → 立方层映射
-# 本表为管线的声明式规格：构建只消费这里解析出的条目，不做自由裁量；
-# 条目的 visibility 决定其是否纳入公开版数据立方（internal = 仅自用构建）。
 # ============================================================
 
 version: 1.0
@@ -63,7 +60,6 @@ layers:
     mask: validity
     notes: 克制原则：上延版转验证参考（同一产品的另一个处理级，见 validation_reference）；官方栅格无 CRS 标签，配准时显式指定 EPSG:4326
 
-  # ---------------- seismology：只收 3D 节点，取消 2D 切片 ----------------
   - id: seismology__gladm35_vsv
     source: glad-m35
     native_res: 1deg
@@ -293,7 +289,6 @@ layers:
     mask: 免
     visibility: internal
     notes: 同 pb2002_plate_id
-  # ---- Slab2：27 带合并为全球层 ----
   - id: stress_kinematics__slab2_depth
     source: slab2（27 俯冲带 × dep）
     native_res: 0.05deg（分区网格）
@@ -500,7 +495,6 @@ layers:
     mask: validity（古地理随时间变化，逐时间片掩膜）
     notes: 抽稀不可逆且存储可承受，故全收；time 轴元数据取文件名 Ma 标签
 
-  # ---------------- derived（四种确定性派生，逐档从源重算）----------------
   - id: derived__landsea_mask
     source: 派生自 etopo2022-bed ice-surface（0m 等值线，冰面口径）
     native_res: 30sec

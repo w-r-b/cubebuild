@@ -1,42 +1,63 @@
-"""矢量/点侧车导出器（侧车导出机制）。
+"""Vector/point sidecar exporter (the sidecar export mechanism).
 
-机制：侧车随立方发布（GeoParquet 为主）；立方层只收
-栅格化/计数产物，原始矢量/点走侧车。已就位：
+Mechanism: sidecars are published alongside the cube (mostly GeoParquet); the
+cube layers only ingest
+rasterized/count products, while raw vectors/points go through sidecars. In
+place:
 
-- hasterok_gprv：global_gprv.shp → GeoParquet，原始 914 多边形与
-  属性表全列保留 + prov_type_code 列（与立方层类别编码一致——
-  编码表经此列直接可查，另见 manifest category_encoding）。
-- limw_polygons：limw-gis-2015.gdb 以 FileGDB 原样传递（v1 不栅格化，
-  v1.1 复评；.gdb 扩展名不可改——GDAL 按扩展名识别，catalog 注记），
-  复制后按文件数与字节总量核对完整性。
-- wsm2025_points：WSM_Database_2025.csv 全 100842 行 →
-  GeoParquet（40 属性列全保留 + 点几何；170 行空坐标几何为空、
-  密度层不计数——见该层 count_semantics）。
-- gsrm_gps_velocities（internal）：GPS_ITRF08.gmt 全 22511 行
-  站点速度 → GeoParquet（psvelo 9 列原值 + lon_180 卷绕列 + 点几何）
-  + poles.* 4 框架欧拉极表合并 parquet；其余 52 参考系文件同站集仅
-  速度随参考系旋转（已实证），不重复收录。
-- heatflow_points_merged：GHFDB 2024 全 91182 条 + NGHF
-  补充 5186 条（不落 GHFDB 0.1° 像元）合并去重单一点集 → GeoParquet
-  （统一口径列 + source 溯源列 + source_row 回查行号 + 点几何）。
-- pb2002_plates：plates（52 板块多边形，unwrap+极帽闭合+窗口
-  裁剪标准几何 + plate_code 立方层编码列）/ boundaries（229 边界段，
-  极性字节与引用，跨日期线 6 段切分 MultiLineString）/ poles（52 欧拉极）
-  三件 parquet 目录侧车。
-- gum_unconsolidated：GUM_v1.0 主文件 911551 多边形 +
-  GUM_pyroclastics 碎屑流 20958 条合并单表（source 溯源列 +
-  lithology_code/thickness_class 立方层编码列，DD 原值列保留）。
-- mooney2023_provinces：GubanovMooney_July2022 六构造稳定化
-  时代 MultiPolygon（Age/Area/layer/path 全列 + age_code 编码列）。
-- global_basins（internal）：evenick2021_global_basins.shp 全 768
-  多边形（= 764 盆地，4 跨日期线盆地各 2 拆分片，统计列为分片统计）
-  + 全属性列 + basin_type_code 编码列；几何为 make_valid 修复后几何。
+- hasterok_gprv: global_gprv.shp → GeoParquet, all original 914 polygons and
+  attribute-table columns preserved + a prov_type_code column (consistent with
+  the cube-layer class encoding—
+  the encoding table is directly retrievable through this column; see also the
+  manifest category_encoding).
+- limw_polygons: limw-gis-2015.gdb passed through as FileGDB (not rasterized in
+  v1, revisited in
+  v1.1; the .gdb extension must not be changed—GDAL identifies by extension,
+  catalog note), integrity
+  checked by file count and total bytes after copying.
+- wsm2025_points: WSM_Database_2025.csv all 100842 rows →
+  GeoParquet (all 40 attribute columns preserved + point geometry; the 170
+  empty-coordinate rows have empty geometry and are not counted by the
+  density layer—see that layer's count_semantics).
+- gsrm_gps_velocities (internal): GPS_ITRF08.gmt all 22511 rows
+  of station velocities → GeoParquet (psvelo 9 raw columns + a lon_180 wrapped
+  column + point geometry)
+  + a merged parquet of the poles.* Euler-pole tables across 4 frames; the
+  other 52 reference-frame files have the same station set with only velocities
+  differing by frame rotation (verified), and are not duplicated.
+- heatflow_points_merged: GHFDB 2024 all 91182 records + the NGHF
+  supplement 5186 records (not falling into GHFDB 0.1° cells) merged and
+  deduplicated into a single point set → GeoParquet
+  (unified schema columns + a source provenance column + a source_row
+  back-reference row number + point geometry).
+- pb2002_plates: plates (52 plate polygons, unwrap + polar-cap closure + window
+  clipping standard geometry + a plate_code cube-layer encoding
+  column) / boundaries (229 boundary segments,
+  polarity bytes and citation, 6 date-line-crossing segments split into
+  MultiLineString) / poles (52 Euler poles)
+  three-parquet directory sidecar.
+- gum_unconsolidated: GUM_v1.0 main file 911551 polygons +
+  GUM_pyroclastics pyroclastic flows 20958 records merged into a single table
+  (a source provenance column +
+  lithology_code/thickness_class cube-layer encoding columns, the DD raw-value
+  column preserved).
+- mooney2023_provinces: GubanovMooney_July2022 six tectonic-stabilization age
+  MultiPolygons (all Age/Area/layer/path columns + an age_code encoding
+  column).
+- global_basins (internal): evenick2021_global_basins.shp all 768
+  polygons (= 764 basins, 4 date-line-crossing basins each with 2 split parts,
+  the statistics columns are per-part statistics)
+  + all attribute columns + a basin_type_code encoding column; the geometry is
+  the make_valid-repaired geometry.
 
-后续侧车在此登记 SIDECARS
-复用导出框架；公开导出按 visibility 剥离 internal 侧车。
+Subsequent sidecars register in SIDECARS here to
+reuse the export framework; the public export strips internal sidecars by
+visibility.
 
-发布布局：sidecars/ 目录与 store 并列；manifest 记相对路径
-"sidecars/<name>"。导出状态可复跑（覆盖式重写，内容确定性）。
+Publish layout: the sidecars/ directory sits alongside the store; the manifest
+records the relative path
+"sidecars/<name>". The export is rerunnable (overwrite rewrite, deterministic
+content).
 """
 
 import shutil
@@ -121,13 +142,15 @@ LIMW_GDB_NAME = "limw-gis-2015.gdb"
 
 
 def _tree_stats(path: Path) -> tuple[int, int]:
-    """目录树 (文件数, 字节总量)——.gdb 原样传递的完整性核对基准。"""
+    """Directory tree (file count, total bytes)—the integrity-check baseline for
+    the .gdb pass-through."""
     files = [p for p in path.rglob("*") if p.is_file()]
     return len(files), sum(p.stat().st_size for p in files)
 
 
 def export_hasterok_gprv(out_dir: Path, src_dir: Path = GPRV_SRC_DIR) -> dict:
-    """global_gprv.shp → GeoParquet 侧车（含立方层一致的 prov_type_code 列）。"""
+    """global_gprv.shp → GeoParquet sidecar (including a prov_type_code column
+    consistent with the cube layer)."""
     import geopandas as gpd
 
     out_dir = Path(out_dir)
@@ -155,7 +178,8 @@ def export_hasterok_gprv(out_dir: Path, src_dir: Path = GPRV_SRC_DIR) -> dict:
 
 
 def export_limw_polygons(out_dir: Path, src_dir: Path = LIMW_SRC_DIR) -> dict:
-    """limw .gdb 原样传递（不栅格化、不改扩展名；复制后完整性核对）。"""
+    """limw .gdb pass-through (no rasterization, no extension change; integrity
+    checked after copying)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     src = Path(src_dir) / LIMW_GDB_NAME
@@ -190,18 +214,21 @@ def export_limw_polygons(out_dir: Path, src_dir: Path = LIMW_SRC_DIR) -> dict:
 
 
 def export_wsm_points(out_dir: Path, src_dir: Path = WSM_SRC_DIR) -> dict:
-    """WSM 2025 全量点表 → GeoParquet 侧车（40 属性列 + 点几何）。
+    """WSM 2025 full point table → GeoParquet sidecar (40 attribute columns +
+    point geometry).
 
-    空坐标 170 行（QUALITY=Xmi）几何为空、原行保留——立方密度层只计
-    可定位 100672 行（层 count_semantics），侧车是全量原始记录。
-    应力方向 AZI/机制 TYPE/质量分级 QUALITY 等全部属性字段随行保留。
+    Empty geometry for the 170 empty-coordinate rows (QUALITY=Xmi), original
+    rows kept—the cube density layer counts only the 100672 locatable rows
+    (layer count_semantics); the sidecar is the full raw record. All attribute
+    fields such as stress direction AZI / mechanism TYPE / quality grade
+    QUALITY are kept per row.
     """
     import geopandas as gpd
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     df = load_wsm_points(src_dir)
-    has_xy = wsm_locatable_mask(df)          # 行数契约校验（与密度层同一实现）
+    has_xy = wsm_locatable_mask(df)
     n_loc = int(has_xy.sum())
     geom = np.empty(len(df), dtype=object)
     geom[:] = None
@@ -231,13 +258,16 @@ def export_wsm_points(out_dir: Path, src_dir: Path = WSM_SRC_DIR) -> dict:
 
 
 def export_gsrm_velocities(out_dir: Path, src_dir: Path = GSRM_SRC_DIR) -> dict:
-    """GSRM GPS 站点速度 + 欧拉极表 → 目录侧车（internal）。
+    """GSRM GPS station velocities + Euler-pole tables → directory sidecar
+    (internal).
 
-    gps_itrf08_velocities.parquet：GPS_ITRF08.gmt 全 22511 行（psvelo 9 列
-    原值——lon 0..360 制；另附 lon_180 卷绕列与 EPSG:4326 点几何，几何
-    逐行落格即还原密度层）。
-    poles.parquet：poles.{APM,IGS08,NNR,PA} 4 框架欧拉极表合并（frame 列；
-    lat lon rate(deg/Ma) plate，列序 lat 在前与 GPS 文件相反）。
+    gps_itrf08_velocities.parquet: GPS_ITRF08.gmt all 22511 rows (psvelo 9 raw
+    columns—lon in 0..360 convention; plus a lon_180 wrapped column and
+    EPSG:4326 point geometry; assigning each geometry row to a cell reproduces
+    the density layer).
+    poles.parquet: poles.{APM,IGS08,NNR,PA} Euler-pole tables for 4 frames
+    merged (frame column; lat lon rate(deg/Ma) plate, with lat first, opposite
+    to the GPS files).
     """
     import geopandas as gpd
 
@@ -280,12 +310,14 @@ def export_gsrm_velocities(out_dir: Path, src_dir: Path = GSRM_SRC_DIR) -> dict:
 
 
 def export_gem_active_faults(out_dir: Path, src_dir: Path = GEM_SRC_DIR) -> dict:
-    """GEM 活动断层全量 → GeoParquet 侧车（internal）。
+    """GEM active faults full set → GeoParquet sidecar (internal).
 
-    13696 条 LineString 断裂 + 全部 23 属性列原样保留 + slip_type_code
-    编码列（与立方层 stress_kinematics__gem_fault_slip_class 类别编码一致
-    ——编码表经此列直接可查，另见 manifest category_encoding）。
-    slip_type 缺失 319 条 code=0（层不栅格化，距离场仍计入）。
+    13696 LineString fault traces + all 23 attribute columns preserved + a
+    slip_type_code encoding column (consistent with the cube-layer
+    stress_kinematics__gem_fault_slip_class class encoding
+    —the encoding table is directly retrievable through this column; see also
+    the manifest category_encoding). 319 records with missing slip_type have
+    code=0 (the layer is not rasterized; the distance field still counts them).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -323,13 +355,17 @@ def export_gem_active_faults(out_dir: Path, src_dir: Path = GEM_SRC_DIR) -> dict
 def export_heatflow_points_merged(out_dir: Path,
                                   ghfdb_src: str | Path = GHFDB_SRC_DIR,
                                   nghf_src: str | Path = NGHF_SRC_DIR) -> dict:
-    """热流合并点集 → GeoParquet 侧车（GHFDB 91182 + NGHF 补充 5186）。
+    """Heat-flow merged point set → GeoParquet sidecar (GHFDB 91182 + NGHF
+    supplement 5186).
 
-    单一点集（克制原则综合为一），统一口径列：source（GHFDB/NGHF 溯源）/
-    source_row（原始文件 0 基行号，回查全字段原始记录）
-    name / lat / lon / q / q_uncertainty / reference / id（GHFDB 记录 ID；
-    NGHF 无 ID 列为空）+ 点几何。逐行落格即还原
-    thermal__heatflow_density（见该层 count_semantics）。
+    A single point set (combined into one by the restraint principle), with
+    unified schema columns: source (GHFDB/NGHF provenance) /
+    source_row (0-based row number in the original file, for back-referencing
+    all fields of the raw record)
+    name / lat / lon / q / q_uncertainty / reference / id (GHFDB record ID;
+    empty for NGHF, which has no ID column) + point geometry. Assigning each row
+    to a cell reproduces
+    thermal__heatflow_density (see that layer's count_semantics).
     """
     import geopandas as gpd
 
@@ -378,16 +414,19 @@ def export_heatflow_points_merged(out_dir: Path,
 
 
 def export_pb2002_plates(out_dir: Path, src_dir: Path = PB2002_SRC_DIR) -> dict:
-    """PB2002 板块三件套 → 目录侧车。
+    """PB2002 plate triplet → directory sidecar.
 
-    plates.parquet：52 板块多边形 GeoParquet（plate 两字母码 + plate_code
-    立方层编码列 + [-180,180] 窗口标准几何——unwrap/极帽闭合/±360 平移
-    裁剪，跨日期线部分正确收回窗口；AN 含南极帽、NA 含北极帽）。
-    boundaries.parquet：229 边界段（code 5 字节：左板块-极性-右板块；
-    极性 '/' = 右侧俯冲于左之下、'\\' = 反向、'-' = 非俯冲；引用注记；
-    跨日期线 6 段切分为 MultiLineString）。
-    poles.parquet：52 欧拉极（plate / lat / lon / rate_deg_per_ma CCW /
-    引用；PA 为任意参考系零旋转，citation 原样保留）。
+    plates.parquet: 52 plate-polygon GeoParquet (two-letter plate code +
+    plate_code cube-layer encoding column + [-180,180] window standard
+    geometry—unwrap/polar-cap closure/±360 shift clipping, date-line-crossing
+    parts correctly brought back into the window; AN includes the Antarctic cap,
+    NA the Arctic cap).
+    boundaries.parquet: 229 boundary segments (code 5 bytes: left plate- polarity
+    -right plate; polarity '/' = the right side subducts beneath the left,
+    '\\' = the reverse, '-' = non-subducting; citation note; 6 date-line-crossing
+    segments split into MultiLineString).
+    poles.parquet: 52 Euler poles (plate / lat / lon / rate_deg_per_ma CCW /
+    citation; PA is an arbitrary-frame zero rotation, citation kept as-is).
     """
     import geopandas as gpd
     from shapely.geometry import LineString, MultiLineString
@@ -479,14 +518,18 @@ def export_pb2002_plates(out_dir: Path, src_dir: Path = PB2002_SRC_DIR) -> dict:
 
 
 def export_gum_unconsolidated(out_dir: Path, src_dir: Path = GUM_SRC_DIR) -> dict:
-    """GUM 全量（主文件 911551 + 碎屑流 20958）→ GeoParquet 侧车。
+    """GUM full set (main file 911551 + pyroclastic flows 20958) → GeoParquet
+    sidecar.
 
-    属性全列保留（Symbol/Descriptio/XX/YY/ZZ/AA/DD/Shape_Leng/Shape_Area）
-    + source 溯源列（GUM_v1.0 主文件 / GUM_pyroclastics 碎屑流，含碎屑流要素）
-    + lithology_code（= 立方层 sediment__gum_
-    lithology_class 类别编码；Ic 固结火山碎屑不在 41 类未固结词汇内，
-    code=0 不参与栅格化）+ thickness_class（= sediment__gum_thickness_class
-    有序分级，DD 原值列同时保留）。
+    All attribute columns preserved (Symbol/Descriptio/XX/YY/ZZ/AA/DD/
+    Shape_Leng/Shape_Area)
+    + a source provenance column (GUM_v1.0 main file / GUM_pyroclastics
+    pyroclastic flows, including pyroclastic features)
+    + lithology_code (= cube-layer sediment__gum_
+    lithology_class class encoding; Ic consolidated volcaniclastics are outside
+    the 41-class unconsolidated vocabulary,
+    code=0, not rasterized) + thickness_class (= sediment__gum_thickness_class
+    ordered classification; the DD raw-value column is also preserved).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -497,8 +540,6 @@ def export_gum_unconsolidated(out_dir: Path, src_dir: Path = GUM_SRC_DIR) -> dic
     pyro["source"] = "GUM_pyroclastics"
     import geopandas as gpd
     import pandas as pd
-    # 两文件属性同构（字段名实测一致）；OBJECTID 仅源内唯一，与 source
-    # 列联合定位原始记录
     merged = gpd.GeoDataFrame(
         pd.concat([main, pyro], ignore_index=True), geometry="geometry", crs="EPSG:4326"
     )
@@ -544,12 +585,14 @@ def export_gum_unconsolidated(out_dir: Path, src_dir: Path = GUM_SRC_DIR) -> dic
 
 def export_mooney2023_provinces(out_dir: Path,
                                 src_dir: Path = MOONEY_SRC_DIR) -> dict:
-    """Mooney 2023 构造省 → GeoParquet 侧车。
+    """Mooney 2023 tectonic provinces → GeoParquet sidecar.
 
-    GubanovMooney_July2022.shp 六行（每构造稳定化时代一 MultiPolygon）
-    属性全列保留（Age/Area/layer/path 原样，path 为源工程内路径痕迹）
-    + age_code（= 立方层 lithosphere__crustal_age_class 编码，1..6 自老
-    至新）。
+    GubanovMooney_July2022.shp six rows (one MultiPolygon per
+    tectonic-stabilization age)
+    with all attribute columns preserved (Age/Area/layer/path as-is; path is a
+    source-project path trace)
+    + age_code (= cube-layer lithosphere__crustal_age_class encoding, 1..6 from
+    old to new).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -582,13 +625,16 @@ def export_mooney2023_provinces(out_dir: Path,
 
 
 def export_global_basins(out_dir: Path, src_dir: Path = BASINS_SRC_DIR) -> dict:
-    """Global Basins 全量 → GeoParquet 侧车（internal）。
+    """Global Basins full set → GeoParquet sidecar (internal).
 
-    768 源多边形行（4 跨日期线盆地各 2 拆分片——统计列为分片统计非
-    盆地级，保留源粒度）+ 全部 38 属性列原样保留 + basin_type_code
-    编码列（= 立方层 sediment__global_basins_class 类别编码）。几何列
-    为 make_valid 修复后几何（Komandorskaya 自交修复；与立方层栅格化
-    同一几何基，逐行落格即还原类别层）。
+    768 source polygon rows (4 date-line-crossing basins each with 2 split
+    parts—the statistics columns are per-part statistics, not basin-level; the
+    source granularity is kept) + all 38 attribute columns preserved + a
+    basin_type_code encoding column (= cube-layer
+    sediment__global_basins_class class encoding). The geometry column is the
+    make_valid-repaired geometry (Komandorskaya self-intersection repaired; the
+    same geometry basis as the cube-layer rasterization, so assigning each row
+    to a cell reproduces the class layer).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -633,8 +679,6 @@ def export_global_basins(out_dir: Path, src_dir: Path = BASINS_SRC_DIR) -> dict:
     }
 
 
-# 侧车注册表：id → 导出器（后续侧车在此登记）；公开导出按 visibility 剥离。
-# 调用方（cli）逐侧车调用导出器并自行决定源缺失的跳过策略。
 SIDECARS = {
     "hasterok_gprv": export_hasterok_gprv,
     "limw_polygons": export_limw_polygons,

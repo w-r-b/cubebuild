@@ -1,15 +1,20 @@
-"""编译侧判据测试（编译侧 + ESSD 回归）。
+"""Compile-side acceptance tests (compile side + ESSD regression).
 
-三组：
-① 修订轮 .tex 交付件自检（`check_tex_delivery.py`）——参考文献内嵌 / 无内部超链接 /
-   单文件零依赖 / 条目数齐备；负例逐条注入；
-② 结构基线与对照（`check_pdf_structure.py`）——页数/溢出/字符零丢失/文本层垃圾/墨迹越界
-   ＋题注夹层/题注-表体分离/PDF 元数据标题；负例用变异基线 dict 复算（不需要重编译）；
-③ ESSD 档冻结面——期刊档派发后 ESSD 两档的字体与几何常量不得漂移（冻结轨回归的
-   静态面；动态面＝essd_regression.sh 重编译＋结构基线对照）。
-另加 SI PDF 判据（`check_supplementary_pdf.py`）。
+Three groups:
+(1) Revision-round .tex delivery self-checks (`check_tex_delivery.py`) — references embedded /
+    no internal hyperlinks / single file with zero dependencies / entry count complete;
+    negatives injected one by one;
+(2) Structural baseline and comparison (`check_pdf_structure.py`) — page count/overfull/zero
+    character loss/text-layer garbage/ink out of bounds
+   ＋ caption sandwich/caption-body separation/PDF metadata title; negatives recomputed with
+    a mutated baseline dict (no recompile needed);
+(3) ESSD profile-frozen surface — after the journal profile is dispatched, the font and
+    geometry constants of the two ESSD profiles must not drift (the static surface of the
+    frozen-track regression; the dynamic surface = essd_regression.sh recompile + structural
+    baseline comparison).
+Additionally, SI PDF checks (`check_supplementary_pdf.py`).
 
-运行：pytest tests/test_build_profiles.py（轻量；仅当产物存在时读 PDF/tex）。
+Run: pytest tests/test_build_profiles.py (lightweight; reads PDF/tex only when artifacts exist).
 """
 from __future__ import annotations
 
@@ -31,7 +36,7 @@ try:
     import check_tex_delivery as ctd  # noqa: E402
     import make_supplementary_tables as mst  # noqa: E402
     import nsd_tables as nt  # noqa: E402
-except ImportError:  # 公开仓不含论文侧脚本与产物：缺件即跳过（沿用缺件跳过惯例）
+except ImportError:
     pymupdf = cps = csp = ctd = mst = nt = None
 
 pytestmark = pytest.mark.skipif(
@@ -51,7 +56,7 @@ def _tex() -> str:
 
 
 def test_tex_delivery_clean():
-    """正例：NSD 档交付件 .tex 过全部判据，且内嵌条目数与稿源一致（49）。"""
+    """Positive case: the NSD-profile delivery .tex passes all checks, and the embedded entry count matches the manuscript source (49)."""
     tex = _tex()
     findings = ctd.run_checks(tex, expected_entries=ctd.count_source_entries(NSD_MD))
     assert findings == [], findings
@@ -64,7 +69,7 @@ def test_tex_delivery_clean():
     ("\\input{extra.tex}", "③ 检出外部文件依赖"),
 ])
 def test_tex_delivery_negatives(inject: str, expect: str):
-    """负例：内部超链接/外部 .bib/外部文件依赖各注入一处 → 命中。"""
+    """Negative: internal hyperlinks/external .bib/external file dependency each injected once → caught."""
     tex = _tex()
     marker = "\\begin{document}"
     findings = ctd.run_checks(tex.replace(marker, inject + "\n" + marker, 1))
@@ -72,7 +77,7 @@ def test_tex_delivery_negatives(inject: str, expect: str):
 
 
 def test_tex_delivery_dropped_entries_detected():
-    """负例：参考文献条目被裁（删掉 10 条 \\item）→ 命中「条目未随件」。"""
+    """Negative: reference entries are pruned (10 \\item lines deleted) → "entries not accompanying the delivery" is caught."""
     tex = _tex()
     m = re.search(r"\\section\*?\{References\}", tex)
     head, tail = tex[:m.end()], tex[m.end():]
@@ -84,7 +89,7 @@ def test_tex_delivery_dropped_entries_detected():
 
 
 def test_pdf_structure_matches_baseline():
-    """结构基线对照：现存产物（ESSD 两档 + NSD 档）逐件 PASS（缺件跳过）。"""
+    """Structural baseline comparison: existing artifacts (both ESSD profiles + NSD profile) each PASS (missing artifacts skipped)."""
     baseline = json.loads(cps.DEFAULT_BASELINE.read_text(encoding="utf-8"))
     checked = 0
     for name, pdf in cps.TARGETS.items():
@@ -99,8 +104,9 @@ def test_pdf_structure_matches_baseline():
 
 
 def test_structure_baseline_detects_drift():
-    """负例：结构指纹漂移（页数掉、丢字、文本层垃圾、墨迹越界、夹层、分离、元数据标题）
-    逐项被对照捕获。"""
+    """Negative: structural-fingerprint drift (page-count drop, lost characters, text-layer
+    garbage, ink out of bounds, sandwich, separation, metadata title)
+    is caught item by item by the comparison."""
     base = {"pages": 27, "empty_pages": 0, "ink_edge_pages": 0,
             "garbled": {"\\protect": 0}, "overfull": 0, "missing_chars": 0,
             "caption_head_duplicates": 0, "caption_body_separation": 0, "pdf_title": ""}
@@ -121,7 +127,7 @@ def test_structure_baseline_detects_drift():
 
 
 def test_essd_profile_constants_frozen():
-    """ESSD 档冻结面：期刊档派发后 zh/en 的字体与几何常量不得漂移。"""
+    """ESSD profile-frozen surface: after the journal profile is dispatched, the font and geometry constants of zh/en must not drift."""
     sh = BUILD_SH.read_text(encoding="utf-8")
     assert 'zh) MAIN_FONT="DejaVu Sans"; MONO_FONT="DejaVu Sans Mono"; CAPTIONSPACE=10;' in sh, \
         "zh 档字体/题注守卫被改（守卫值 10＝按档实测保留：zh 守卫下 0/0、去守卫致题注跨页 3 处；变更须显式重录）"
@@ -135,36 +141,36 @@ def test_essd_profile_constants_frozen():
 
 
 def test_caption_guard_is_gated_by_profile():
-    """回归哨兵（按档实测确定）：题注守卫必须
-    **按档门控**（取值语义见 build 脚本 case 块注释）——去掉门控使守卫无条件注入即被本断言
-    拦下；各档取值（zh=10、en/nsd=0）逐字钉在 test_essd_profile_constants_frozen。
-    交付件 .tex 侧另核零 \\needspace（见下）。"""
+    """Regression sentinel (determined by per-profile measurement): the caption guard must be
+    **gated by profile** (value semantics in the build script's case-block comment) — removing
+    the gate and injecting the guard unconditionally is caught by this assertion; each profile's
+    value (zh=10, en/nsd=0) is pinned verbatim in test_essd_profile_constants_frozen.
+    The delivery .tex side separately checks for zero \\needspace (see below)."""
     sh = BUILD_SH.read_text(encoding="utf-8")
     assert 'if [ "$CAPTIONSPACE" -gt 0 ]; then' in sh, \
         "题注守卫失去按档门控（en 档将重新出现夹层）"
-    # 各档取值（zh=10、en/nsd=0）由 test_essd_profile_constants_frozen 逐字钉住，不在此重复。
 
 
 def test_nsd_delivery_tex_has_no_caption_guard():
-    """交付件侧同判据：NSD 档 .tex 零 \\needspace（守卫未注入）——「装回守卫」的产物面证据。"""
+    """Same check on the delivery side: the NSD-profile .tex has zero \\needspace (guard not injected) — artifact-side evidence of "putting the guard back"."""
     tex = _tex()
     assert "\\needspace" not in tex, "NSD 交付件 .tex 出现题注守卫（夹层将复发）"
 
 
 def test_nsd_delivery_tex_has_header_split():
-    """交付件侧正面判据长表「首页头部/续页
-    表头」二分须实际落入交付件——`\\endfirsthead` 与 `\\endhead` 各表恰好一份（二分对外部
-    渲染零效应，缺本断言则正则失配会静默通过）。"""
+    """Delivery-side positive check: the long table's "first-page head/continuation-page
+    head" split must actually land in the delivery — `\\endfirsthead` and `\\endhead` appear
+    exactly once per table (the split has zero effect on external
+    rendering; without this assertion a regex mismatch would pass silently)."""
     tex = _tex()
     n_tables = tex.count("\\begin{longtable}")
     assert n_tables >= 1
     assert tex.count("\\endfirsthead") == n_tables, "二分缺失/不完整（\\endfirsthead 计数≠表数）"
     assert tex.count("\\endhead") == n_tables, "续页表头缺失/不完整（\\endhead 计数≠表数）"
 
-# ---------- 题注夹层判据（用户报告「表格看似编码错误」的实因） ----------
 
 def _synthetic_pdf(path: Path, duplicated_head: bool) -> Path:
-    """合成单页 PDF：可选地复现「表头→题注→表头→表体」的题注夹层形态。"""
+    """Synthetic single-page PDF: optionally reproduces the "header→caption→header→body" caption-sandwich form."""
     import pymupdf
     doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
@@ -179,7 +185,7 @@ def _synthetic_pdf(path: Path, duplicated_head: bool) -> Path:
 
 
 def test_caption_sandwich_detector(tmp_path: Path):
-    """判据鉴别力：夹层形态计 1、干净形态计 0（合成件，不依赖真实 PDF）。"""
+    """Check discriminating power: the sandwich form scores 1, the clean form scores 0 (synthetic artifacts, not depending on a real PDF)."""
     bad = cps.caption_head_duplicates(pymupdf.open(_synthetic_pdf(tmp_path / "bad.pdf", True)))
     good = cps.caption_head_duplicates(pymupdf.open(_synthetic_pdf(tmp_path / "good.pdf", False)))
     assert bad == 1, bad
@@ -187,10 +193,13 @@ def test_caption_sandwich_detector(tmp_path: Path):
 
 
 def test_essd_en_caption_sandwich_pinned_to_zero():
-    """冻结 ESSD 英文稿题注夹层钉在 **0**（去守卫
-    修复登记 3 处（表 2/6/7）→ 0；修复前该件是「缺陷类先于迁移存在」的机械证据）。
-    若回归出现夹层，本断言失败即提示「en 档守卫被装回」（守卫按档开关见 build 脚本 case 块）。
-    `essd-zh` 档由守卫钉值与基线对照另核（守卫保留为实测决策，见 build 脚本 case 块）。"""
+    """Frozen ESSD English manuscript caption sandwich pinned at **0** (guard removal fixed 3
+    registered cases (tables 2/6/7) → 0; before the fix this artifact was the mechanical
+    evidence for "the defect class predates the migration").
+    If a sandwich reappears in regression, this assertion failing signals "the en-profile guard
+    was put back" (per-profile guard switching in the build script's case block).
+    The `essd-zh` profile is checked separately via the guard pin values and baseline comparison
+    (the guard is retained as a measured decision; see the build script's case block)."""
     pdf, log = cps.TARGETS["essd-en"], BUILD / "_manuscript-en.log"
     if not pdf.exists():
         pytest.skip("ESSD 英文稿编译件不存在")
@@ -199,8 +208,10 @@ def test_essd_en_caption_sandwich_pinned_to_zero():
 
 
 def test_nsd_caption_sandwich_pinned_to_zero():
-    """NSD 档夹层计数钉在 **0**（不写「等于基线」——以可被证伪；
-    D1 的收益面）。若回归出现夹层，本断言失败即提示「守卫被装回」或版面退化。"""
+    """NSD-profile sandwich count pinned at **0** (not written as "equals the baseline" — so it
+    can be falsified;
+    the benefit side of D1). If a sandwich reappears in regression, this assertion failing
+    signals "the guard was put back" or layout degradation."""
     pdf, log = cps.TARGETS["nsd-en"], BUILD / "_manuscript-nsd.log"
     if not pdf.exists():
         pytest.skip("NSD 编译件不存在")
@@ -209,8 +220,10 @@ def test_nsd_caption_sandwich_pinned_to_zero():
 
 
 def test_nsd_caption_separation_matches_recorded_state():
-    """NSD 档题注-表体分离计数等于重录后的登记值（D1 的**代价**面；不去守卫则
-    分离归零而夹层复发——两者同登记，禁单边优化）。"""
+    """The NSD-profile caption-body separation count equals the re-recorded registered value (the
+    **cost** side of D1; not removing the guard makes
+    the separation zero but revives the sandwich — both are registered together, single-sided
+    optimization is forbidden)."""
     pdf, log = cps.TARGETS["nsd-en"], BUILD / "_manuscript-nsd.log"
     if not pdf.exists():
         pytest.skip("NSD 编译件不存在")
@@ -221,14 +234,15 @@ def test_nsd_caption_separation_matches_recorded_state():
 
 
 def _synthetic_separation_pdf(path: Path, with_line_number: bool) -> Path:
-    """合成单页 PDF：题注下方本页只剩 lineno 行号块（with_line_number）＝表体次页形态；
-    否则题注下方接表头行＝表题注同页形态。"""
+    """Synthetic single-page PDF: if only the lineno line-number block remains below the caption
+    on this page (with_line_number) = table-body-next-page form;
+    otherwise the caption is followed by a header row = table-caption-same-page form."""
     import pymupdf
     doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
     page.insert_text((72, 80), "Table 1. A source dataset inventory caption block.")
     if with_line_number:
-        page.insert_text((40, 700), "14")           # lineno 边距行号（独立数字块）
+        page.insert_text((40, 700), "14")
     else:
         page.insert_text((72, 130), "No. Dataset Domain group DOI")
     doc.save(path)
@@ -237,8 +251,10 @@ def _synthetic_separation_pdf(path: Path, with_line_number: bool) -> Path:
 
 
 def test_caption_separation_detector(tmp_path: Path):
-    """判据鉴别力：题注下接表头（未分离）计 0；题注下只剩 lineno 行号块（真分离）计 1
-    ——行号块若不滤除，该形态会被误判为「未分离」，分离计数将永远为 0（判据失效）。"""
+    """Check discriminating power: a caption followed by a header row (not separated) scores 0; a
+    caption with only the lineno block below (true separation) scores 1
+    — if the line-number block is not filtered out, this form is misjudged as "not separated",
+    and the separation count would forever be 0 (the check fails)."""
     clean = cps.caption_body_separation(
         pymupdf.open(_synthetic_separation_pdf(tmp_path / "clean.pdf", False)))
     sepa = cps.caption_body_separation(
@@ -248,7 +264,7 @@ def test_caption_separation_detector(tmp_path: Path):
 
 
 def test_pdf_metadata_title_matches_manuscript():
-    """D6 判据：NSD 编译件 PDF 元数据标题 = NSD 稿 H1（题名行）。"""
+    """D6 check: the NSD compiled PDF metadata title = the NSD manuscript H1 (title line)."""
     pdf, log = cps.TARGETS["nsd-en"], BUILD / "_manuscript-nsd.log"
     if not pdf.exists():
         pytest.skip("NSD 编译件不存在")
@@ -258,7 +274,7 @@ def test_pdf_metadata_title_matches_manuscript():
 
 
 def test_pdf_metadata_missing_is_caught(tmp_path: Path):
-    """负例：PDF 无标题元数据（或标题漂移）→ 命中「元数据标题≠稿源题名」。"""
+    """Negative: the PDF has no title metadata (or the title drifts) → "metadata title ≠ manuscript source title" is caught."""
     import pymupdf
     doc = pymupdf.open()
     doc.new_page(width=595, height=842).insert_text((72, 80), "Table 1. A caption.")
@@ -270,7 +286,6 @@ def test_pdf_metadata_missing_is_caught(tmp_path: Path):
     with_title = {"pdf_title": "A global multi-resolution data cube"}
     assert cps.metadata_findings(with_title, "A global multi-resolution data cube") == []
 
-# ---------- SI PDF 判据 ----------
 
 def _si_pages() -> list[str]:
     if not mst.SI_PDF.exists():
@@ -279,14 +294,14 @@ def _si_pages() -> list[str]:
 
 
 def test_si_pdf_content_and_captions_match_sources():
-    """正例：SI PDF 逐字段同源于 csv、题注同源于提交要件 §4、主文无 S 表题注、每表一页起排。"""
+    """Positive case: each field of the SI PDF is co-sourced with the csv, captions are co-sourced with submission requirements §4, the main text has no S-table captions, and each table starts on its own page."""
     findings = csp.run_checks(mst.SI_PDF, nt.SUPPLEMENTARY_DIR, mst.supplementary_captions(),
                               NSD_MD.read_text(encoding="utf-8"))
     assert findings == [], findings
 
 
 def test_si_pdf_mutated_cell_detected(tmp_path: Path):
-    """负例：csv 篡改一格（1.0000→1.0001）→ 命中「字段未见于 SI PDF」（载体漂移）。"""
+    """Negative: one csv cell tampered (1.0000→1.0001) → "field absent from the SI PDF" is caught (carrier drift)."""
     pages = _si_pages()
     src = nt.SUPPLEMENTARY_DIR / "TableS2-layer-coverage.csv"
     assert "1.0000" in src.read_text(encoding="utf-8")
@@ -299,7 +314,7 @@ def test_si_pdf_mutated_cell_detected(tmp_path: Path):
 
 
 def test_si_pdf_caption_drift_detected():
-    """负例：题注改一字（提交要件已改而 SI PDF 未重生成）→ 命中题注不一致。"""
+    """Negative: a caption word changed (submission requirements changed but the SI PDF was not regenerated) → caption inconsistency caught."""
     pages = _si_pages()
     drifted = dict(mst.supplementary_captions())
     drifted[1] = drifted[1].replace("Layer registry", "Layer registery", 1)
@@ -308,14 +323,14 @@ def test_si_pdf_caption_drift_detected():
 
 
 def test_si_pdf_main_md_red_line_detected():
-    """负例：主文出现 S 表题注（期刊规范禁止项）→ 命中。"""
+    """Negative: an S-table caption appears in the main text (a journal-spec prohibited item) → caught."""
     md = NSD_MD.read_text(encoding="utf-8")
     assert csp.main_md_findings(md) == []
     assert csp.main_md_findings("**Supplementary Table 1.** Layer registry …") != []
 
 
 def test_si_pdf_layout_start_of_page():
-    """判据鉴别力：两表题注同页 → 命中「未一页起排」；各起一页 → 通过。"""
+    """Check discriminating power: two tables' captions on the same page → "not each starting on its own page" caught; each starting on its own page → pass."""
     caps = {1: "C1", 2: "C2"}
     assert csp.layout_findings(["Supplementary Table 1. C1\nSupplementary Table 2. C2"], caps)
     assert csp.layout_findings(["Supplementary Table 1. C1\nrow", "Supplementary Table 2. C2"],
@@ -323,8 +338,10 @@ def test_si_pdf_layout_start_of_page():
 
 
 def test_si_pdf_generator_records_single_caption_source():
-    """题注单一来源：生成端与判据端同读提交要件 §4 表（两处各写一份即漂移）；且题注须为
-    可直接提交的英文（中文来源注记应在本表第 4 列，不随件提交）。"""
+    """Single caption source: both the generating side and the checking side read the submission
+    requirements §4 table (writing one copy in each place causes drift); moreover, captions must
+    be ready-to-submit English (Chinese source annotations belong in column 4 of this table and
+    are not submitted with the delivery)."""
     caps = mst.supplementary_captions()
     assert sorted(caps) == [e.s_number for e in nt.active_supp_entries()]
     cjk = re.compile(r"[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]")
@@ -333,21 +350,26 @@ def test_si_pdf_generator_records_single_caption_source():
 
 
 def test_nsd_pdf_metadata_author_stays_empty():
-    """D5/D6：PDF 元数据作者字段须留空（SSOT 无署名块，署名由投稿系统采集）；
-    字段一旦出现即命中——「无署名块」约定从人眼检查升为机械判据。"""
+    """D5/D6: the PDF metadata author field must be left empty (the author block enters the
+    manuscript as body text, without writing the PDF /Author);
+    once the field appears it is caught — the "no author in metadata" convention is raised from
+    eyeball inspection to a mechanical check."""
     pdf, log = cps.TARGETS["nsd-en"], BUILD / "_manuscript-nsd.log"
     if not pdf.exists():
         pytest.skip("NSD 编译件不存在")
     measured = cps.measure(pdf, log)
     assert measured["pdf_author"] == "", measured
-    assert cps.metadata_findings(measured, "A global multi-resolution data cube") != []  # 题名不符先命中
+    assert cps.metadata_findings(measured, "A global multi-resolution data cube") != []
     assert cps.metadata_findings({"pdf_title": "X", "pdf_author": "A. Author"}, "X") == \
-        ["PDF 元数据作者字段非空：'A. Author'（SSOT 无署名块）"]
+        ["PDF 元数据作者字段非空：'A. Author'（署名块应走正文、不设 PDF 元数据）"]
 
 
 def test_si_pdf_font_program_magic_is_truetype():
-    """⑤ 字体结构判据：SI PDF 所用字体程序魔数须为 TrueType（glyf）。
-    负例用分类器鉴别力表达（CFF/OTF 会被写成违规范的 FontFile2 内含 CFF，字形整片不渲染）。"""
+    """(5) Font-structure check: the font program magic of the fonts used by the SI PDF must be
+    TrueType (glyf).
+    The negative is expressed via the classifier's discriminating power (CFF/OTF would be
+    written as a non-compliant FontFile2 containing CFF, and the glyphs would not render at
+    all)."""
     pages = _si_pages()
     assert pages
     assert csp.font_findings(mst.SI_PDF) == [], csp.font_findings(mst.SI_PDF)

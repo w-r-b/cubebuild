@@ -1,17 +1,23 @@
-"""测试：类别众数核（nodata 语义）+ 多边形栅格化器 + 整型缺测
-两通道一致性 + 侧车导出器（GeoParquet / FileGDB 原样传递）。
+"""Tests: categorical mode kernel (nodata semantics) + polygon rasteriser + integer
+missing-data two-channel consistency + sidecar exporters (GeoParquet / FileGDB
+pass-through as-is).
 
-判据只测外部行为：
-- 众数核：nodata 不参与计数、全 nodata 块 → nodata、平票取小、
-  nodata=None 保持陆海掩膜语义（0 是真实类）；
-- 栅格化器：胞心落入语义（中心不在多边形内的细条不烧录）、重叠
-  面积较小者胜出（确定性规则）、极帽 cut 表示（lat=90 闭合边）平面
-  栅格化正确；
-- 读取器：prov_type 词汇表契约、跨日期线环拒绝（平面栅格化不安全）；
-- 掩膜机制：uint8 类别层 0=缺测 的两通道一致性（构建端 + 管线端）；
-- 侧车：hasterok GeoParquet 往返（行数/编码列/几何）、limw .gdb
-  原样传递完整性（合成树；真实 1.2G 传递由验收构建覆盖）；
-- 真实源集成（存在时）：栅格化覆盖/重叠基线 + e2e uint8 层入 store。
+The criteria test external behaviour only:
+- mode kernel: nodata does not participate in the count, an all-nodata block → nodata, a
+  tie picks the smaller class, nodata=None preserves the land-sea mask semantics (0 is a
+  real class);
+- rasteriser: cell-centre-containment semantics (a thin strip with no centre inside a polygon
+  is not burned), on overlap the smaller area wins (deterministic rule), and planar
+  rasterisation of the pole-cap cut representation (edge closed along lat=90) is correct;
+- reader: prov_type vocabulary contract, rejection of a ring crossing the dateline (planar
+  rasterisation is unsafe);
+- mask mechanism: two-channel consistency of a uint8 categorical layer where 0=missing
+  (build side + pipeline side);
+- sidecars: hasterok GeoParquet round-trip (row count / encoding column / geometry), limw .gdb
+  pass-through integrity as-is (synthetic tree; the real 1.2G pass-through is covered by the
+  acceptance build);
+- real-source integration (when present): rasterisation coverage / overlap baselines + e2e
+  uint8 layer into the store.
 """
 
 import json
@@ -51,38 +57,37 @@ def _entry(mask="validity", dtype="uint8"):
     )
 
 
-# ---------------- 类别众数核：nodata 语义 ----------------
 
 def test_aggregate_mode_nodata_excluded():
-    """nodata=0 不参与计数：块 [0,0,5,5] 的众数是 5 而非 0。"""
+    """nodata=0 does not participate in the count: the mode of the block [0,0,5,5] is 5, not 0."""
     data = np.array([[0, 0, 5, 5], [5, 5, 0, 0]], dtype=np.uint8)
     out = aggregate_mode(data, 2, nodata=0)
     assert out.tolist() == [[5, 5]]
 
 
 def test_aggregate_mode_all_nodata_block():
-    """全 nodata 块 → nodata（无有效子胞即缺测）。"""
+    """All-nodata block → nodata (no valid sub-cell means missing)."""
     data = np.zeros((2, 4), dtype=np.uint8)
     out = aggregate_mode(data, 2, nodata=0)
     assert out.tolist() == [[0, 0]]
 
 
 def test_aggregate_mode_tie_smallest_class():
-    """平票取小：块 [3,7 / 3,7] 计数 2:2 → 3（确定性，scipy 同约定）。"""
+    """Tie picks the smaller class: the block [3,7 / 3,7] counts 2:2 → 3 (deterministic, same convention as scipy)."""
     data = np.array([[3, 7, 3, 7], [3, 7, 3, 7]], dtype=np.uint8)
     assert aggregate_mode(data, 2, nodata=0).tolist() == [[3, 3]]
 
 
 def test_aggregate_mode_without_nodata_keeps_landsea_semantics():
-    """nodata=None 保持语义：0 是真实类（陆海掩膜 0=海）——
-    块 [0,1/0,1] 平票取 0；nodata=0 时同一块众数为 1。"""
+    """nodata=None preserves the semantics: 0 is a real class (land-sea mask 0=sea) —
+    the block [0,1/0,1] ties and picks 0; with nodata=0 the same block's mode is 1."""
     data = np.array([[0, 1, 0, 1], [0, 1, 0, 1]], dtype=np.uint8)
     assert aggregate_mode(data, 2).tolist() == [[0, 0]]
     assert aggregate_mode(data, 2, nodata=0).tolist() == [[1, 1]]
 
 
 def test_aggregation_factor_integers_only():
-    """主档 3′ → 6′/30′/1° = 2/10/20；细于主档（30″）即显式失败。"""
+    """Home tier 3′ → 6′/30′/1° = 2/10/20; finer than the home tier (30″) fails explicitly."""
     assert _aggregation_factor("6min") == 2
     assert _aggregation_factor("30min") == 10
     assert _aggregation_factor("1deg") == 20
@@ -90,27 +95,27 @@ def test_aggregation_factor_integers_only():
         _aggregation_factor("30sec")
 
 
-# ---------------- 多边形栅格化器 ----------------
 
 def test_rasterize_center_semantics():
-    """胞心落入多边形才烧录：1° 网格上 box(0,0,1,1) 恰烧 (0.5°,0.5°)
-    一胞；不含任何胞心的细条 box(0.1,0.2,0.2,0.3) 不烧任何胞。"""
+    """Burns only where the cell centre falls inside the polygon: on the 1° grid box(0,0,1,1)
+    burns exactly one cell at (0.5°,0.5°); the thin strip box(0.1,0.2,0.2,0.3) containing no
+    cell centre burns no cell."""
     from shapely.geometry import box
 
     geoms = [box(0.0, 0.0, 1.0, 1.0), box(0.1, 0.2, 0.2, 0.3)]
     codes = np.array([7, 9], dtype=np.uint8)
     classes, overlap, uncovered = rasterize_polygon_classes(geoms, codes, "1deg")
-    # 胞心 (lat=0.5, lon=0.5) → 行 90（-90+r+0.5）、列 180（-180+c+0.5）
     assert classes[90, 180] == 7
     classes[90, 180] = 0
-    assert not classes.any()                     # 细条未烧任何胞
+    assert not classes.any()
     assert overlap == 0
     assert uncovered == classes.size - 1
 
 
 def test_rasterize_overlap_smaller_wins():
-    """重叠像元取面积较小多边形（确定性规则）：大 box 码 9、内部小
-    box 码 2 → 小 box 区域 = 2，其余大 box 区域 = 9。"""
+    """On overlapping pixels the smaller-area polygon wins (deterministic rule): the big box
+    has code 9, the inner small box has code 2 → the small-box region = 2 and the rest of the
+    big box = 9."""
     from shapely.geometry import box
 
     big = box(0.0, 0.0, 10.0, 10.0)
@@ -118,35 +123,31 @@ def test_rasterize_overlap_smaller_wins():
     classes, overlap, _ = rasterize_polygon_classes(
         [big, small], np.array([9, 2], dtype=np.uint8), "1deg"
     )
-    # 乱序传入也应同结果（面积降序规则与传入顺序无关）
     classes2, _, _ = rasterize_polygon_classes(
         [small, big], np.array([2, 9], dtype=np.uint8), "1deg"
     )
     np.testing.assert_array_equal(classes, classes2)
-    # 小 box 胞心 (4.5..5.5)² → 4 胞为码 2
     small_cells = classes[94:96, 184:186]
     assert (small_cells == 2).all()
-    # 大 box 其余胞 = 9；重叠计数 = 小 box 烧录胞数
     assert classes[90:100, 180:190].sum() - small_cells.sum() == 9 * (100 - 4)
     assert overlap == 4
 
 
 def test_rasterize_pole_cap_representation():
-    """极帽 cut 表示（环沿 lat=90 闭合边 −180→180）：平面栅格化应把
-    纬度高于 85° 的全部行烧满（北极盆形态，磁盘实证的唯一 >180° 边）。"""
+    """Pole-cap cut representation (the ring closes along the lat=90 edge from −180 to 180):
+    planar rasterisation should fill every row above 85° latitude (the Arctic-basin shape, the
+    only >180° edge measured on disk)."""
     from shapely.geometry import Polygon
 
     cap = Polygon([(-180.0, 85.0), (-180.0, 90.0), (180.0, 90.0), (180.0, 85.0)])
     classes, _, _ = rasterize_polygon_classes([cap], np.array([4], dtype=np.uint8), "1deg")
-    # 胞心 lat 85.5..89.5（行 175..179）全列烧录；84.5（行 174）不烧
     assert (classes[175:180, :] == 4).all()
     assert (classes[:175, :] == 0).all()
 
 
-# ---------------- 读取器：词汇表与几何契约 ----------------
 
 def test_prov_type_encoding_table():
-    """编码表：15 类、码 1..15 字典序、category_encoding 往返一致。"""
+    """Encoding table: 15 classes, codes 1..15 in lexicographic order, and category_encoding round-trips consistently."""
     assert len(PROV_TYPE_CODES) == 15
     assert sorted(PROV_TYPE_CODES.values()) == list(range(1, 16))
     enc = category_encoding()
@@ -168,7 +169,7 @@ def _fake_gdf(rows, prov_types):
 
 
 def _fake_gdf_n(n, prov_type="basin"):
-    """n 行同构假源（行数契约 914 通过，供后续检查触发）。"""
+    """n rows of a homogeneous fake source (passes the 914-row contract, so subsequent checks can be triggered)."""
     return _fake_gdf(
         [(float(i), 0.0, float(i) + 0.5, 0.5) for i in range(n)],
         [prov_type] * n,
@@ -176,7 +177,7 @@ def _fake_gdf_n(n, prov_type="basin"):
 
 
 def _fake_src(tmp_path):
-    """占位源文件（存在性检查通过；read_file 由 monkeypatch 替换）。"""
+    """Placeholder source file (passes the existence check; read_file is replaced by monkeypatch)."""
     p = tmp_path / "plates&provinces/shp/global_gprv.shp"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("", encoding="utf-8")
@@ -194,8 +195,8 @@ def test_load_gprv_rejects_unknown_prov_type(tmp_path, monkeypatch):
 
 
 def test_load_gprv_rejects_dateline_crossing(tmp_path, monkeypatch):
-    """跨日期线环（Δlon>180° 且非极点闭合边）读取期即拒绝——
-    平面栅格化会静默错位。"""
+    """Rejected at read time: a ring crossing the dateline (Δlon>180° and not a pole-closing
+    edge) — planar rasterisation would silently misalign it."""
     import geopandas as gpd
     from shapely.geometry import Polygon
 
@@ -221,7 +222,6 @@ def test_load_gprv_rejects_wrong_rows(tmp_path, monkeypatch):
         load_gprv(_fake_src(tmp_path))
 
 
-# ---------------- 整型缺测两通道一致性 ----------------
 
 def test_data_missing_by_dtype():
     import xarray as xr
@@ -233,7 +233,7 @@ def test_data_missing_by_dtype():
 
 
 def test_build_validity_mask_uint8_layer():
-    """uint8 类别层：掩膜 0 ⟺ 数据 0（编码自 1 起，0 = 无类别）。"""
+    """uint8 categorical layer: mask 0 ⟺ data 0 (encoding starts at 1, 0 = no class)."""
     import dask.array as da
     import xarray as xr
 
@@ -247,11 +247,10 @@ def test_build_validity_mask_uint8_layer():
     assert mask.attrs["validity_of"] == "lithosphere__hasterok_province_class"
 
 
-# ---------------- 侧车导出器 ----------------
 
 @requires_gprv
 def test_export_hasterok_sidecar_roundtrip(tmp_path):
-    """hasterok 侧车：GeoParquet 往返（行数/属性列/编码列/几何/CRS）。"""
+    """hasterok sidecar: GeoParquet round-trip (row count / attribute columns / encoding column / geometry / CRS)."""
     import geopandas as gpd
 
     rec = export_hasterok_gprv(tmp_path)
@@ -262,7 +261,6 @@ def test_export_hasterok_sidecar_roundtrip(tmp_path):
     back = gpd.read_parquet(tmp_path / "hasterok_gprv.parquet")
     assert len(back) == 914
     assert back.crs.to_epsg() == 4326
-    # 原始属性表全列保留 + 编码列与立方层一致
     for col in ("prov_name", "prov_type", "prov_group", "lastorogen",
                 "crust_type", "area"):
         assert col in back.columns
@@ -271,8 +269,9 @@ def test_export_hasterok_sidecar_roundtrip(tmp_path):
 
 
 def test_export_limw_passthrough_synthetic(tmp_path):
-    """limw 侧车：.gdb 原样传递（合成树验证机制：名字不变、逐文件
-    字节级一致、完整性核对、manifest 记录字段）。"""
+    """limw sidecar: .gdb pass-through as-is (mechanism verified on a synthetic tree: the name is
+    unchanged, files are byte-identical, integrity is checked, and manifest fields are
+    recorded)."""
     src = tmp_path / "src"
     (src / "limw-gis-2015.gdb" / "sub").mkdir(parents=True)
     f1 = src / "limw-gis-2015.gdb" / "a.dat"
@@ -283,17 +282,14 @@ def test_export_limw_passthrough_synthetic(tmp_path):
     out = tmp_path / "sidecars"
     rec = export_limw_polygons(out, src_dir=src)
     dst = out / "limw-gis-2015.gdb"
-    assert dst.is_dir() and dst.name.endswith(".gdb")   # 扩展名不可改
+    assert dst.is_dir() and dst.name.endswith(".gdb")
     assert rec["id"] == "limw_polygons" and rec["format"] == "filegdb"
     assert rec["n_files"] == 2 and rec["size_bytes"] == 2500
-    # LiMW 侧车不纳入公开版（GLiM 层维持
-    # public——CC BY 3.0 等价口径）
     assert rec["visibility"] == "internal"
     assert "不栅格化" in rec["notes"] and "internal" in rec["notes"]
     assert (dst / "a.dat").read_bytes() == f1.read_bytes()
     assert (dst / "sub" / "b.dat").read_bytes() == f2.read_bytes()
 
-    # 覆盖式复跑（可重入）：旧内容清空，不残留
     (dst / "stale.dat").write_bytes(b"stale")
     export_limw_polygons(out, src_dir=src)
     assert not (dst / "stale.dat").exists()
@@ -304,7 +300,6 @@ def test_export_limw_missing_source(tmp_path):
         export_limw_polygons(tmp_path, src_dir=tmp_path / "nowhere")
 
 
-# ---------------- 真实源集成：e2e uint8 类别层入 store ----------------
 
 _MINI = """
 version: test
@@ -326,14 +321,14 @@ layers:
 
 @requires_gprv
 def test_vector_layer_e2e(tmp_path, monkeypatch):
-    """uint8 类别层全链路：build → 结构验证 PASS（含整型两通道一致
-    硬判据）→ manifest 编码表/覆盖率 → 保真报告 PASS（众数一致性）。"""
+    """uint8 categorical layer full chain: build → structural validation PASS (including the
+    integer two-channel consistency hard criterion) → manifest encoding table / coverage →
+    fidelity report PASS (mode consistency)."""
     import cubebuild.cli
     from cubebuild.manifest import read_manifest
     from cubebuild.sidecars import export_hasterok_gprv
     from cubebuild.vector import build_hasterok_fidelity_report
 
-    # 只导出 hasterok 侧车（limw .gdb 1.2G 不入单测）
     monkeypatch.setattr(
         cubebuild.cli, "SIDECARS", {"hasterok_gprv": export_hasterok_gprv}
     )
@@ -353,28 +348,26 @@ def test_vector_layer_e2e(tmp_path, monkeypatch):
     assert entry["id"] == "lithosphere__hasterok_province_class"
     assert entry["dtype"] == "uint8"
     assert entry["validity_mask"] == "lithosphere__hasterok_province_class__validity"
-    # 类别编码表随 manifest 可查（验收项）
     enc = json.loads(entry["category_encoding"])
     assert enc[str(PROV_TYPE_CODES["craton"])] == "craton"
     assert entry["coverage"]["3min"] == pytest.approx(0.99999, abs=1e-5)
     assert entry["coverage"]["1deg"] == 1.0
     assert "rasterization_rule" in entry
 
-    # 侧车登记
     assert [s["id"] for s in manifest["sidecars"]] == ["hasterok_gprv"]
 
-    # 保真：逐位一致 + 众数一致性 + 值域（硬判据全过）
     report = build_hasterok_fidelity_report(out, "lithosphere__hasterok_province_class",
                                             ["1deg", "6min", "3min"])
     assert report["result"] == "PASS", report["checks"]
     n_hard = sum(1 for c in report["checks"] if c["status"] != "report")
-    assert n_hard == 3 * 2 + 2   # 3 档 × (逐位+值域) + 2 粗档众数一致性
+    assert n_hard == 3 * 2 + 2
 
 
 @requires_gprv
 def test_real_gprv_rasterization_baselines():
-    """真实源基线（磁盘实证的契约化）：914 行、3′ 覆盖 0.99999、
-    重叠 319 胞（0.001%）、未覆盖 241 胞（省界数字化缝隙）。"""
+    """Real-source baseline (contract derived from disk measurement): 914 rows, 3′ coverage
+    0.99999, 319 overlapping cells (0.001%), 241 uncovered cells (digitising gaps at province
+    boundaries)."""
     gdf, codes = load_gprv()
     assert len(gdf) == 914
     assert set(codes) <= set(range(1, 16))
@@ -389,10 +382,10 @@ def test_real_gprv_rasterization_baselines():
 
 @requires_gprv
 def test_geo_spot_checks_against_source():
-    """地理终检（常驻回归判据）：10 地标点（克拉通/洋脊/弧后/
-    极区/裂谷）处 store 值 == 源多边形在该点最近胞心处的类别
-    （contains + 面积最小者，同重叠规则）——方位/镜像类缺陷的
-    独立地理验证。"""
+    """Geographic final check (standing regression criterion): at 10 landmark points (craton /
+    mid-ocean ridge / back-arc / polar region / rift) the store value == the class of the source
+    polygon at the nearest cell centre to that point (contains + smallest area, same overlap
+    rule) — an independent geographic verification of orientation / mirror defects."""
     import geopandas as gpd
     import xarray as xr
     from shapely.geometry import Point
@@ -416,14 +409,14 @@ def test_geo_spot_checks_against_source():
     }
     for name, (lat, lon) in pts.items():
         sel = arr.sel(lat=lat, lon=lon, method="nearest")
-        clat, clon = float(sel.lat), float(sel.lon)   # 最近胞心坐标
+        clat, clon = float(sel.lat), float(sel.lon)
         got = int(sel.values)
         cand = gdf[gdf.contains(Point(clon, clat))]
         if len(cand):
-            idx = cand.geometry.area.idxmin()          # 同重叠规则：面积最小者
+            idx = cand.geometry.area.idxmin()
             expect = PROV_TYPE_CODES[cand.loc[idx, "prov_type"]]
         else:
-            expect = 0                                 # 胞心不在任何多边形内
+            expect = 0
         assert got == expect, (
             f"{name}: store={got} vs 源@胞心({clat:.4f},{clon:.4f})={expect}"
         )
@@ -432,24 +425,24 @@ def test_geo_spot_checks_against_source():
 
 @requires_gprv
 def test_windowed_rasterize_equals_fullgrid_direct():
-    """独立路径位级比对：逐多边形开窗烧录（窗口几何/变换自算）vs
-    全网格单次 rasterio 直核（同重叠规则：面积降序 + later-wins）。
-    两者一致 ⇒ 窗口行/列/变换数学正确（镜像/错位类缺陷在此暴露——
-    开发期行号南北约定混用即被本类比对擒获）。"""
+    """Independent-path bit-level comparison: per-polygon windowed burning (window geometry /
+    transform computed independently) vs a single full-grid rasterio direct rasterisation (same
+    overlap rule: descending area + later-wins). Agreement between the two ⇒ the windowed row /
+    column / transform maths is correct (mirror / misalignment defects surface here — a mixed
+    row-number north-south convention during development is caught by exactly this comparison)."""
     import rasterio.features as rfeatures
     from rasterio.transform import from_origin
     from cubebuild.grids import grid_shape, tier_deg
 
     gdf, codes = load_gprv()
-    tier = "30min"                       # 直核全网格代价可承受的最细档
+    tier = "30min"
     nlat, nlon = grid_shape(tier)
     res = tier_deg(tier)
-    # 面积降序 → later-wins = 面积较小者胜（与栅格化器同规则）
     order = np.argsort([-g.area for g in gdf.geometry], kind="stable")
     shapes = [(gdf.geometry[i], int(codes[i])) for i in order]
     direct = rfeatures.rasterize(
         shapes, out_shape=(nlat, nlon),
         transform=from_origin(-180.0, 90.0, res, res), fill=0, dtype="uint8",
-    )[::-1]   # rasterio 全网格行序北起；项目档位网格行 0 = −90 侧
+    )[::-1]
     windowed, _, _ = rasterize_polygon_classes(list(gdf.geometry), codes, tier)
     np.testing.assert_array_equal(windowed, direct)

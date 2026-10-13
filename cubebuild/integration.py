@@ -1,18 +1,18 @@
-"""集成验证总报告：立方 v1.0 质量的总验收单。
+"""Integration verification master report: the acceptance sheet for cube v1.0 quality.
 
-四件套：
-1. 结构层：validate_store 全量（47 层 × YAML 契约逐条 + 1° 全集档完整性
-   + 铁律复检 + 同档配准）——validate.py 承担，本模块汇总其结果；
-2. 保真层：既有逐层保真报告（fidelity-*.json，各层自供）的
-   汇总——逐层列出超容差（FAIL）项；不重跑（距离场类报告单次耗时小时级，
-   汇总以报告为口径，附时效性核对）；
-3. 物理交叉四组：crosscheck.py 承担（只报告不拦截）；
-4. 构建回报四项：GHFDB/NGHF 整编核实结论、Slab2 重叠像元总量、LITHO1 nc
-   变量清单、各层覆盖率登记——自既有回报制品提取汇总。
+Four parts:
+1. Structure layer: full validate_store (47 layers × YAML contract item-by-item + 1° full-set tier completeness
+   + iron-law recheck + same-tier registration) — handled by validate.py, this module aggregates its result;
+2. Fidelity layer: aggregation of the existing per-layer fidelity reports (fidelity-*.json, each layer self-supplied)
+   — lists out-of-tolerance (FAIL) items per layer; not re-run (distance-field-type reports take hours per run,
+   the aggregation uses the reports as the source of truth, with a freshness check);
+3. Physical cross-check four groups: handled by crosscheck.py (report-only, no blocking);
+4. Build-obligation four items: GHFDB/NGHF incorporation verification conclusion, Slab2 overlap pixel total, LITHO1 nc
+   variable inventory, per-layer coverage registry — extracted and aggregated from existing report artifacts.
 
-总结果判据：结构验证 PASS ∧ 保真汇总无 FAIL ∧ 回报四项齐备；物理交叉
-不参与判据（：只报告不拦截，但组执行失败=无报告可出，属交付缺失，
-计 FAIL）。
+Overall result criterion: structure validation PASS ∧ fidelity summary has no FAIL ∧ all four obligations present; physical cross-check
+does not enter the criterion (: report-only, no blocking, but a group execution failure = no report produced, which counts as missing delivery,
+counted as FAIL).
 """
 
 import json
@@ -26,12 +26,10 @@ from .crosscheck import (
 from .manifest import read_manifest
 from .validate import validate_store, write_report
 
-# 保真报告覆盖例外：该层的保真不由 fidelity-* 报告承担
 FIDELITY_COVERAGE_EXCEPTIONS = {
     "derived__pixel_area": "由结构验证承担（数值=解析公式逐档核对 + 全球面积守恒）",
 }
 
-# 检查项家族归类（积分量/分位数/众数一致性/计数守恒/距离抽样……汇总）
 _FAMILY_RULES = (
     ("积分量", ("积分量守恒", "积分恒等式")),
     ("分位数", ("分位数",)),
@@ -58,22 +56,21 @@ def _families(check_names: list[str]) -> list[str]:
     return fams
 
 
-# ---------------- 保真汇总 ----------------
 
 def fidelity_summary(reports_dir: str | Path, contract: Contract,
                      store_dir: str | Path) -> dict:
-    """逐层保真报告汇总：结果/家族/超容差（FAIL）项逐层列出 + 覆盖 + 时效性。
+    """Per-layer fidelity report aggregation: result/families/out-of-tolerance (FAIL) items listed per layer + coverage + freshness.
 
-    时效性（报告制）：早于最终构建的保真报告标记 stale——其结论依赖
-    构建确定性（两轮 checksum 实证）成立。构建终点基准 = store 根
-    cube_manifest.json mtime（构建管线最后写入，晚于全部数组；zarr.json
-    是建库起点，code-review 实证会低估 stale 面）。
+    Freshness (report-mode): a fidelity report earlier than the final build is marked stale — its conclusion relies
+    on build determinism (verified by two checksum rounds) holding. Build-end baseline = the store root
+    cube_manifest.json mtime (the build pipeline writes it last, after all arrays; zarr.json
+    is the store-creation start point, a code review has empirically shown it underestimates the stale surface).
     """
     reports_dir = Path(reports_dir)
     per_layer: dict[str, dict] = {}
     for path in sorted(reports_dir.glob("fidelity-*.json")):
         if path.name == "fidelity-summary.json":
-            continue          # 本汇总自身不入逐层清单（自我包含防护）
+            continue
         try:
             rep = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
@@ -100,8 +97,6 @@ def fidelity_summary(reports_dir: str | Path, contract: Contract,
         lid for lid in contract_ids
         if lid not in per_layer and lid not in FIDELITY_COVERAGE_EXCEPTIONS
     ]
-    # 双向完备（与 validate.py manifest↔契约互检同哲学）：孤儿报告
-    # （报告层不在契约内，如历史遗留）不 FAIL 但显式报告
     orphans = sorted(set(per_layer) - set(contract_ids))
     _add_check(
         checks,
@@ -114,7 +109,6 @@ def fidelity_summary(reports_dir: str | Path, contract: Contract,
         ),
     )
 
-    # 时效性：报告早于最终构建 → stale（依赖构建确定性，报告制）
     manifest_meta = Path(store_dir) / "cube_manifest.json"
     store_mtime = manifest_meta.stat().st_mtime if manifest_meta.is_file() else None
     stale = []
@@ -199,15 +193,13 @@ def write_fidelity_summary(summary: dict, reports_dir: str | Path) -> Path:
     return json_path
 
 
-# ---------------- 构建回报四项 ----------------
 
 def build_obligations(reports_dir: str | Path, store_dir: str | Path) -> dict:
-    """构建期回报义务四项汇总（既有制品提取；缺失 = FAIL）。"""
+    """Aggregation of the four build-time reporting obligations (extracted from existing artifacts; missing = FAIL)."""
     reports_dir = Path(reports_dir)
     checks: list[dict] = []
     items: dict = {}
 
-    # ① GHFDB/NGHF 整编核实结论（fidelity-thermal__heatflow_density.json）
     thermal_path = reports_dir / "fidelity-thermal__heatflow_density.json"
     try:
         thermal = json.loads(thermal_path.read_text(encoding="utf-8"))
@@ -231,7 +223,6 @@ def build_obligations(reports_dir: str | Path, store_dir: str | Path) -> dict:
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
         _add_check(checks, "回报① GHFDB/NGHF 整编核实结论", "FAIL", f"{thermal_path.name}: {e}")
 
-    # ② Slab2 重叠像元总量（slab2-merge.json）
     slab2_path = reports_dir / "slab2-merge.json"
     try:
         s2 = json.loads(slab2_path.read_text(encoding="utf-8"))
@@ -250,7 +241,6 @@ def build_obligations(reports_dir: str | Path, store_dir: str | Path) -> dict:
     except (OSError, ValueError, json.JSONDecodeError) as e:
         _add_check(checks, "回报② Slab2 重叠像元总量", "FAIL", f"{slab2_path.name}: {e}")
 
-    # ③ LITHO1 nc 变量清单（litho1-inventory.json）
     litho_path = reports_dir / "litho1-inventory.json"
     try:
         inv = json.loads(litho_path.read_text(encoding="utf-8"))
@@ -272,7 +262,6 @@ def build_obligations(reports_dir: str | Path, store_dir: str | Path) -> dict:
     except (OSError, ValueError, json.JSONDecodeError) as e:
         _add_check(checks, "回报③ LITHO1 nc 变量清单", "FAIL", f"{litho_path.name}: {e}")
 
-    # ④ 各层覆盖率登记（cube_manifest.json）
     try:
         manifest = read_manifest(store_dir)
         coverage = {m["id"]: m["coverage"] for m in manifest["layers"]}
@@ -328,7 +317,6 @@ def write_obligations_report(obligations: dict, reports_dir: str | Path) -> Path
     for c in obligations["checks"]:
         detail = (c["summary"] or "").replace("|", "\\|")
         lines.append(f"| {c['name']} | {c['status']} | {detail} |")
-    # 覆盖率全表（各层覆盖率登记；档位列 = 全层档位并集，缺档 = —）
     cov = obligations.get("items", {}).get("coverage_registry", {}).get("coverage")
     if cov:
         tiers = sorted({t for c in cov.values() for t in c})
@@ -349,28 +337,22 @@ def write_obligations_report(obligations: dict, reports_dir: str | Path) -> Path
     return json_path
 
 
-# ---------------- 集成总报告 ----------------
 
 def build_integration_report(store_dir, contract: Contract,
                              reports_dir: str | Path,
                              crosscheck_src_dirs: dict | None = None) -> dict:
-    """总验收单：结构验证（全量）+ 保真汇总 + 构建回报四项 + 物理交叉四组。"""
+    """Master acceptance sheet: structure validation (full) + fidelity summary + build-obligation four items + physical cross-check four groups."""
     reports_dir = Path(reports_dir)
 
-    # 1. 结构验证（全量）——validate_store 为唯一实现，报告落盘 structure-validation.*
     structure = validate_store(store_dir, contract)
     write_report(structure, reports_dir)
 
-    # 2. 保真汇总（既有逐层报告聚合，不重跑）
     fidelity = fidelity_summary(reports_dir, contract, store_dir)
     write_fidelity_summary(fidelity, reports_dir)
 
-    # 3. 构建回报四项
     obligations = build_obligations(reports_dir, store_dir)
     write_obligations_report(obligations, reports_dir)
 
-    # 4. 物理交叉四组（crosscheck 统一装配：只报告不拦截；组执行失败 =
-    #    无报告可出，属交付缺失 → FAIL）
     cross_checks = assemble_crosscheck_groups(store_dir, crosscheck_src_dirs)
     crosscheck = {
         "store": str(store_dir),

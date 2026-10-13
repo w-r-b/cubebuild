@@ -1,16 +1,16 @@
-"""重采样核库：按变量类型分派的纯函数核。
+"""Resampling-kernel library: pure-function kernels dispatched by variable type.
 
-整数倍块聚合的面积加权保守平均（ETOPO 15s 走该路径）；
-通用区间重叠保守核（conservative_overlap_mean）：支持分数倍档
-（如 2min→3min 因子 1.5）、缺测权重归一、源网格极点半胞/极冠缺口——
-单文件全球栅格源（WGM2012/EMAG2/GlobSed 等）统一走该路径。
- aggregate_sum（计数求和核）：点密度层主档 bincount 直出、
-粗档块内求和（计数守恒构造性保证）。
- conservative_overlap_circular_axial（轴向 2θ 循环统计核）：
-轴向角（0–180°，σ 与 σ+180 同义）经 φ=2θ 变换恢复整圆后做面积加权
-循环统计，走向类变量（Slab2 strike）降采样走该路径。
+Integer-factor block aggregation with area-weighted conservative mean (ETOPO 15s takes this path);
+generic interval-overlap conservative kernel (conservative_overlap_mean): supports fractional factors
+(e.g. 2min→3min factor 1.5), missing-value weight normalization, source-grid pole half-cells/polar-cap gaps —
+single-file global raster sources (WGM2012/EMAG2/GlobSed etc.) all take this path.
+ aggregate_sum (count-summation kernel): point-density layers' primary tier via direct bincount,
+ coarse tiers by in-block summation (count conservation guaranteed by construction).
+ conservative_overlap_circular_axial (axial 2θ circular-statistics kernel):
+axial angles (0–180°, σ and σ+180 synonymous) are transformed by φ=2θ to recover the full circle, then
+area-weighted circular statistics are applied; strike-type variables (Slab2 strike) downsampling takes this path.
 
-约定：核为纯函数（源网格， 目标档位参数）→ 目标网格，不持有源特定几何。
+Convention: kernels are pure functions (source grid, target tier parameters) → target grid, holding no source-specific geometry.
 """
 
 from fractions import Fraction
@@ -22,16 +22,16 @@ from .pixel_area import EARTH_RADIUS_KM
 
 
 def aggregate_mode(data: np.ndarray, factor: int, nodata: int | None = None) -> np.ndarray:
-    """众数聚合（类别变量核，纯函数）。
+    """Mode aggregation (categorical-variable kernel, pure function).
 
-    粗像元 = factor×factor 块内计数的众数；平票取最小类值（确定性，
-    scipy.stats.mode 同约定）。块内按类计数，类别升序遍历 + 严格大于
-    比较保证平票时先到（最小）类胜出。
+    Coarse pixel = the mode of counts within a factor×factor block; ties take the smallest class value (deterministic,
+    same convention as scipy.stats.mode). Counting by class within the block, ascending class iteration + strict-greater
+    comparison ensures the first-arriving (smallest) class wins the tie.
 
-    nodata：类别编码中的缺测哨兵值（整型类别层 0 = 无类别，
-    如矢量栅格化的未覆盖像元）。给定时不参与计数——粗像元 = 有效
-    （≠nodata）子胞的众数，块内无任何有效子胞 → nodata。部分覆盖
-    像元保留值的语义与保守核「W>0 即有值」一致。
+    nodata: the missing-value sentinel in the class encoding (0 = no class for integer categorical layers,
+    e.g. uncovered pixels from vector rasterization). When given it does not participate in counting — a coarse pixel =
+    the mode of valid (≠nodata) subcells, and no valid subcell in the block → nodata. The semantics of retaining a value
+    for a partially covered pixel match the conservative kernel's "W>0 means a value".
     """
     m, n = data.shape
     if m % factor or n % factor:
@@ -43,7 +43,7 @@ def aggregate_mode(data: np.ndarray, factor: int, nodata: int | None = None) -> 
     else:
         out = np.full((ot, on), nodata, dtype=data.dtype)
     best = np.zeros((ot, on), dtype=np.int64)
-    for c in np.unique(data):          # 升序；严格 > → 平票保留最小类值
+    for c in np.unique(data):
         if nodata is not None and c == nodata:
             continue
         cnt = (v == c).sum(axis=(1, 3))
@@ -54,11 +54,11 @@ def aggregate_mode(data: np.ndarray, factor: int, nodata: int | None = None) -> 
 
 
 def aggregate_sum(data: np.ndarray, factor: int) -> np.ndarray:
-    """计数求和聚合（点密度核，纯函数）。
+    """Count-summation aggregation (point-density kernel, pure function).
 
-    粗像元 = factor×factor 块内计数之和——计数守恒（Σ粗档 = Σ细档 =
-    源记录数）由本核构造性保证。uint64 归约后回 uint32（单 3′ 胞计数
-    远小于 2³²，回转纯防御）。
+    Coarse pixel = the sum of counts within a factor×factor block — count conservation (Σ coarse tier = Σ fine tier =
+    source record count) is guaranteed by construction. Reduces in uint64 then casts back to uint32 (a single 3′ cell count
+    is far below 2³²; the cast-back is purely defensive).
     """
     m, n = data.shape
     if m % factor or n % factor:
@@ -69,12 +69,12 @@ def aggregate_sum(data: np.ndarray, factor: int) -> np.ndarray:
 
 
 def aggregate_weighted(data: np.ndarray, row_w: np.ndarray, factor: int) -> np.ndarray:
-    """面积加权保守平均（连续变量核，纯函数，float64 计算）。
+    """Area-weighted conservative mean (continuous-variable kernel, pure function, computed in float64).
 
-    data: (m, n)，m/n 均为 factor 整数倍；row_w: (m,) 各源行面积权重。
-    粗像元值 = Σ_{i,j} w_i·v_ij / (factor·Σ_i w_i)（列等权、行按面积加权）。
-    解析恒等式（行面积 telescoping，A_c = factor·Σ块内 w）：v_c·A_c = Σ_{fine} v·A
-    → 积分量严格守恒（保真验证 <0.1% 判据可精确满足）。
+    data: (m, n), both m/n are integer multiples of factor; row_w: (m,) per-source-row area weights.
+    Coarse pixel value = Σ_{i,j} w_i·v_ij / (factor·Σ_i w_i) (equal weight across columns, area-weighted across rows).
+    Analytical identity (row-area telescoping, A_c = factor·Σ w within the block): v_c·A_c = Σ_{fine} v·A
+    → the integral quantity is strictly conserved (the fidelity <0.1% criterion can be met exactly).
     """
     m, n = data.shape
     if m % factor or n % factor:
@@ -87,29 +87,27 @@ def aggregate_weighted(data: np.ndarray, row_w: np.ndarray, factor: int) -> np.n
     return num / den
 
 
-# ---------------- 通用区间重叠保守核 ----------------
 
-# 纬度行面积因子：A = R²·Δsin·Δλ_rad。列重叠以度计，此处折算 rad → W 单位 km²。
 _ROW_AREA_FACTOR = EARTH_RADIUS_KM**2 * np.pi / 180.0
 
 
 def _lcm_fraction(a: Fraction, b: Fraction) -> Fraction:
-    """两个正有理数的最小公倍数（lcm(a/b, c/d) = lcm(ad, cb)/(bd)）。"""
+    """Least common multiple of two positive rationals (lcm(a/b, c/d) = lcm(ad, cb)/(bd))."""
     num = lcm(a.numerator * b.denominator, b.numerator * a.denominator)
     return Fraction(num, a.denominator * b.denominator)
 
 
 def _column_pattern(lon_res: Fraction, tgt_res: Fraction,
                     lon_phase: Fraction = Fraction(0)) -> tuple[np.ndarray, int]:
-    """经度周期块重叠模式：返回 (C, Q)。
+    """Longitude periodic-block overlap pattern: returns (C, Q).
 
-    源胞中心在 lon_phase − 180 + k·lon_res（宽 lon_res，环接日期线）；目标
-    胞边在 −180 + j·tgt_res。周期 L = lcm(lon_res, tgt_res)：每周期 P = L/tgt_res
-    个目标列 ↔ Q = L/lon_res 个源列。C[u, v+1] = 目标列 u（周期内）与源列
-    v ∈ [-1, Q+1] 的重叠长度（度）。分数倍档（如 1.5）由此精确处理。
-    lon_phase：源网格经度相位（度，Fraction）——HFgrid14 类
-    0.25 偏移中心（相位 = lon_res/2）即边缘对齐 -180 的像素注册网格；
-    默认 0 = 中心在整倍数处（WGM 节点 Voronoi / EMAG2 卷绕后形态）。
+    Source-cell centers at lon_phase − 180 + k·lon_res (width lon_res, wrapping around the dateline); target
+    cell edges at −180 + j·tgt_res. Period L = lcm(lon_res, tgt_res): per period P = L/tgt_res
+    target columns ↔ Q = L/lon_res source columns. C[u, v+1] = the overlap length (in degrees) of target column u (within the period) with source column
+    v ∈ [-1, Q+1]. Fractional factors (e.g. 1.5) are handled exactly by this.
+    lon_phase: source-grid longitude phase (degrees, Fraction) — the HFgrid14-type
+    0.25-offset center (phase = lon_res/2) is the pixel-registration grid with edges aligned to -180;
+    the default 0 = centers at integer multiples (the WGM node-Voronoi / EMAG2 post-wrapping form).
     """
     if lon_res <= 0 or tgt_res <= 0:
         raise ValueError("分辨率必须为正")
@@ -130,11 +128,11 @@ def _column_pattern(lon_res: Fraction, tgt_res: Fraction,
 
 
 def _column_stage(X: np.ndarray, M: np.ndarray, C: np.ndarray, Q: int) -> tuple[np.ndarray, np.ndarray]:
-    """列阶段：源行块 × 周期模式 → (加权值和, 加权有效和)，均为 (r, nlon_t)。
+    """Column stage: source-row block × periodic pattern → (weighted value sum, weighted valid sum), both (r, nlon_t).
 
-    X: (r, nlon_s) 源值（无效位已置 0）；M: (r, nlon_s) 0/1 有效位。
-    环接：两侧各扩展 Q+1 列（源列索引 -1..-Q-1 ≡ 末尾回绕）。
-    einsum 不优化（单线程 C 归约）——构建确定性可复跑的保证之一。
+    X: (r, nlon_s) source values (invalid positions already zeroed); M: (r, nlon_s) 0/1 valid mask.
+    Wrapping: pad Q+1 columns on each side (source column indices -1..-Q-1 ≡ wrap around at the end).
+    einsum is not optimized (single-threaded C reduction) — one of the guarantees of reproducible, deterministic builds.
     """
     nlon = X.shape[1]
     P = C.shape[0]
@@ -151,15 +149,15 @@ def _column_stage(X: np.ndarray, M: np.ndarray, C: np.ndarray, Q: int) -> tuple[
 
 
 def _row_windows(lat_edges: np.ndarray, tgt_res: Fraction) -> list[tuple[int, int, np.ndarray]]:
-    """目标行的源行窗口与 sin 权重（conservative_overlap_mean 与
-    conservative_overlap_circular_axial 共用；自前者无改动抽出——
-    纯函数，输出逐位不变）。
+    """Source-row windows and sin weights for each target row (shared by conservative_overlap_mean and
+    conservative_overlap_circular_axial; extracted from the former unchanged —
+    pure function, output bit-identical).
 
-    返回列表第 i 项 = (源行起, 源行止, 权重 (k,) km²)；目标行无任何源
-    胞重叠时为 (-1, -2, None)。重叠区间的 sin 差 × R²·rad 折算。
+    List item i = (source row start, source row end, weights (k,) km²); a target row with no source
+    cell overlap is (-1, -2, None). The sin difference over the overlap interval × R²·rad conversion.
     """
     nlat_t = int(Fraction(180) / tgt_res)
-    last_row = len(lat_edges) - 2          # 源行末索引（edges = 行数 + 1）
+    last_row = len(lat_edges) - 2
     t_edges = -90.0 + np.arange(nlat_t + 1, dtype=np.float64) * float(tgt_res)
     win: list[tuple[int, int, np.ndarray]] = []
     for i in range(nlat_t):
@@ -187,21 +185,21 @@ def conservative_overlap_mean(
     tgt_res: Fraction,
     lon_phase: Fraction = Fraction(0),
 ) -> tuple[np.ndarray, np.ndarray]:
-    """通用面积加权保守平均（连续变量核，纯函数，float64 计算）。
+    """Generic area-weighted conservative mean (continuous-variable kernel, pure function, computed in float64).
 
-    适用源网格：全球规则经度环（源胞中心 lon_phase−180 + k·lon_res，
-    nlon·lon_res=360；lon_phase 默认 0 = 中心在整倍数处，支持
-    0.25 偏移类像素注册相位）+ 任意纬度边（可含极点半胞、极冠缺口、
-    区域纬度带——Slab2 分区网格使用）；
-    目标网格：全球档位网格（边对齐 -180/-90，中心偏移半档）。
+    Applicable source grids: global regular longitude ring (source-cell centers lon_phase−180 + k·lon_res,
+    nlon·lon_res=360; lon_phase default 0 = centers at integer multiples, supports a
+    0.25-offset-type pixel-registration phase) + arbitrary latitude edges (may include pole half-cells, polar-cap gaps,
+    regional latitude bands — used by Slab2 zone grids);
+    target grid: global tier grid (edges aligned to -180/-90, center offset by half a tier).
 
-    缺测语义：valid=False 的源像元不参与；目标值 = 有效源像元面积权重
-    归一平均（部分覆盖像元无偏但代表性弱）；无有效源像元 → NaN。
-    积分恒等式：Σ_t v_t·W_t = Σ_s v_s·w_s（s 限有效源胞，w_s = 源胞
-    面积 km²；W_t = 目标胞内有效源面积权重 km²）——保真 <0.1% 判据
-    可精确检验（W 由本核原样返回供保真复算）。
+    Missing-value semantics: source pixels with valid=False do not participate; the target value = the area-weight
+    normalized mean of valid source pixels (a partially covered pixel is unbiased but weakly representative); no valid source pixel → NaN.
+    Integral identity: Σ_t v_t·W_t = Σ_s v_s·w_s (s restricted to valid source cells, w_s = source-cell
+    area km²; W_t = valid source area weight within the target cell km²) — the fidelity <0.1% criterion
+    can be checked exactly (W is returned verbatim by this kernel for fidelity recomputation).
 
-    返回 (values float32 (nlat_t, nlon_t), W float64 同 shape)。
+    Returns (values float32 (nlat_t, nlon_t), W float64 of the same shape).
     """
     data = np.asarray(data)
     valid = np.asarray(valid, dtype=bool)
@@ -220,7 +218,6 @@ def conservative_overlap_mean(
     values = np.full((nlat_t, nlon_t), np.nan, dtype=np.float32)
     W = np.zeros((nlat_t, nlon_t), dtype=np.float64)
     vm = (valid & np.isfinite(data)).astype(np.float64)
-    # 无效位（含 NaN）显式置 0：NaN×0=NaN 会污染 einsum 归约
     Xm = np.where(vm > 0, data.astype(np.float64, copy=False), 0.0)
 
     ROWS_PER_CHUNK = 256
@@ -250,23 +247,23 @@ def conservative_overlap_circular_axial(
     tgt_res: Fraction,
     lon_phase: Fraction = Fraction(0),
 ) -> tuple[np.ndarray, np.ndarray]:
-    """轴向 2θ 循环统计保守核（几何与 conservative_overlap_mean
-    完全同构，仅值域换为轴向角循环统计）。
+    """Axial 2θ circular-statistics conservative kernel (geometry fully isomorphic to conservative_overlap_mean,
+    with only the value domain changed to axial-angle circular statistics).
 
-    轴向角 θ ∈ [0,180)：σ 与 σ+180° 同义（走向线无方向性），不能直接
-    在 360° 圆上平均。φ = 2θ ∈ [0,360) 恢复整圆后做面积加权循环统计：
+    Axial angle θ ∈ [0,180): σ and σ+180° are synonymous (a strike line has no directionality), so they cannot
+    be averaged directly on the 360° circle. After φ = 2θ ∈ [0,360) restores the full circle, area-weighted circular statistics are applied:
 
-        C = Σ_s w_s·cos(2θ_s)，S = Σ_s w_s·sin(2θ_s)
+        C = Σ_s w_s·cos(2θ_s), S = Σ_s w_s·sin(2θ_s)
         θ̄ = ½·atan2(S, C) mod 180
 
-    w_s = 有效源胞面积权重 km²（与保守核同权）。输出角取 [0,180)；
-    合成矢量对消（C=S=0，如 θ 与 θ+90 等权）时 atan2(0,0)=0 → θ̄=0
-    （确定性约定，实测仅在正交双峰人工构造下出现）。无有效源像元 → NaN。
+    w_s = valid source-cell area weight km² (same weighting as the conservative kernel). The output angle is in [0,180);
+    when the resultant vector cancels (C=S=0, e.g. θ and θ+90 with equal weight), atan2(0,0)=0 → θ̄=0
+    (deterministic convention, empirically observed only under artificially constructed orthogonal bimodality). No valid source pixel → NaN.
 
-    轴向性质（由构造保证）：θ 输入换 θ+180 输出不变；跨 0/180 边界
-    的均值正确（170/175/5/10 → ~0，朴素算术平均得 90 为其反面教材）。
+    Axial properties (guaranteed by construction): replacing θ input with θ+180 leaves the output unchanged; the mean across the
+    0/180 boundary is correct (170/175/5/10 → ~0; the naive arithmetic mean yielding 90 is its counterexample).
 
-    返回 (values float32 (nlat_t, nlon_t), W float64 同 shape)。
+    Returns (values float32 (nlat_t, nlon_t), W float64 of the same shape).
     """
     data = np.asarray(data)
     valid = np.asarray(valid, dtype=bool)
@@ -285,7 +282,6 @@ def conservative_overlap_circular_axial(
     values = np.full((nlat_t, nlon_t), np.nan, dtype=np.float32)
     W = np.zeros((nlat_t, nlon_t), dtype=np.float64)
     vm = (valid & np.isfinite(data)).astype(np.float64)
-    # 2θ 通道（rad）：无效位显式置 0（cos0=1 但乘 M=0 归零，不污染归约）
     phi = np.deg2rad(2.0 * data.astype(np.float64, copy=False))
     cosm = np.where(vm > 0, np.cos(phi), 0.0)
     sinm = np.where(vm > 0, np.sin(phi), 0.0)

@@ -1,7 +1,9 @@
-"""期刊指南逐条合规对照表的判据测试。
+"""Criteria tests for the item-by-item journal-guideline compliance mapping table.
 
-正例＝真对照表零发现；负例逐条注入（缺条目／未登记条目／非法状态／缺证据指针／待办项
-未指向提交要件）——判据须能抓住「表本身失效」的各类形态。
+A positive case = the real mapping table yields zero findings; negative cases
+are injected item by item (missing entry / unregistered entry / illegal status /
+missing evidence pointer / to-do item not pointing at a submission requirement)
+-- the criteria must catch the various forms of "the table itself being broken".
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ sys.path.insert(0, str(REPO / "paper" / "scripts"))
 
 try:
     import check_compliance_nsd as cc  # noqa: E402
-except ImportError:  # 公开仓不含论文侧脚本与产物：缺件即跳过（沿用缺件跳过惯例）
+except ImportError:
     cc = None
 
 pytestmark = pytest.mark.skipif(
@@ -24,9 +26,7 @@ pytestmark = pytest.mark.skipif(
 
 DOC = REPO / "submission-compliance-nsd.md"
 REQUIREMENTS = REPO / "submission-requirements-nsd.md"
-# 当前登记的四处待办（与提交要件 §1 前置动作一一对应；任一闭环须显式改本集合）；
-# 题名回改后新增 title → §1 动作 9。
-TODO_KEYS = {"title"}  # 与对照表现存待办集一致；闭环一项就删一项，禁静默放宽/收紧
+TODO_KEYS = set()
 
 
 def _doc() -> str:
@@ -38,26 +38,26 @@ def _row(text: str, key: str) -> str:
 
 
 def test_compliance_table_clean():
-    """正例：对照表过三条自检（条目封闭／状态枚举封闭／每条含指针）。"""
+    """Positive case: the mapping table passes the three self-checks (entry closure / status-enum closure / each row carries a pointer)."""
     findings = cc.run_checks(_doc())
     assert findings == [], findings
 
 
 def test_compliance_item_set_is_the_ten_guideline_faces():
-    """条目集合 = 指南十面（题名/摘要/节集/图/表/参考文献/可得性/文件集/事务段/修订轮 .tex）。"""
+    """Entry set = the ten guideline faces (title / abstract / section set / figures / tables / references / availability / file set / transaction section / revision-round .tex)."""
     rows = cc.parse_rows(_doc())
     assert [r[0].strip("`") for r in rows] == [k for k, _ in cc.REQUIRED_ITEMS]
 
 
 def test_compliance_missing_item_detected():
-    """负例：删一条条目 → 命中「缺条目」。"""
+    """Negative case: delete one entry -> "missing entry" is caught."""
     text = _doc()
     findings = cc.run_checks(text.replace(_row(text, "title") + "\n", "", 1))
     assert any("缺条目：title" in f for f in findings), findings
 
 
 def test_compliance_unknown_item_detected():
-    """负例：插入未登记条目（条目集合须封闭）→ 命中。"""
+    """Negative case: insert an unregistered entry (the entry set must be closed) -> caught."""
     text = _doc()
     injected = "| `funding-extra` | 自造要求 | `submission-requirements-nsd.md` | 通过 |\n"
     findings = cc.run_checks(text.replace("## 待办项与前置动作的对应", injected +
@@ -66,7 +66,7 @@ def test_compliance_unknown_item_detected():
 
 
 def test_compliance_illegal_status_detected():
-    """负例：状态改成枚举外取值（如「部分通过」）→ 命中。"""
+    """Negative case: change the status to a value outside the enum (e.g. "partially passing") -> caught."""
     text = _doc()
     row = _row(text, "tex")
     findings = cc.run_checks(text.replace(row, row.rsplit("|", 2)[0] + "| 部分通过 |", 1))
@@ -74,7 +74,7 @@ def test_compliance_illegal_status_detected():
 
 
 def test_compliance_missing_pointer_detected():
-    """负例：抹掉证据指针（反引号内联码）→ 命中。"""
+    """Negative case: erase the evidence pointer (inline code in backticks) -> caught."""
     text = _doc()
     row = _row(text, "figures")
     stripped = row.split("|")
@@ -84,24 +84,28 @@ def test_compliance_missing_pointer_detected():
 
 
 def test_compliance_todo_requires_registered_action():
-    """负例：待办项不指向提交要件（新增未登记待办）→ 命中。"""
+    """Negative case: an entry has to-do status but its evidence does not point
+    at a submission requirement -> "to-do item not pointing" is caught. This
+    constructs the to-do scenario itself and does not depend on whether the
+    mapping table currently has any to-do rows."""
     text = _doc()
-    row = _row(text, "title")   # 当前唯一待办项
-    stripped = row.split("|")
-    stripped[3] = " 某个未登记的动作 "
-    findings = cc.run_checks(text.replace(row, "|".join(stripped), 1))
+    row = _row(text, "title")
+    cells = row.split("|")
+    cells[3] = " `paper/manuscript/SEDC-manuscript-nsd-en.md` 某落点 "
+    cells[4] = " 待办 "
+    findings = cc.run_checks(text.replace(row, "|".join(cells), 1))
     assert any("待办项未指向" in f for f in findings), findings
 
 
 def test_compliance_todo_set_is_recorded_state():
-    """待办集合＝登记现状（当前仅 `title` 因已知偏差保留）；闭环后须显式更新本集合（禁静默放宽/收紧）。"""
+    """The to-do set = the currently to-do rows of the mapping table = TODO_KEYS (after closing an item this set must be updated explicitly; silently loosening/tightening is forbidden)."""
     statuses = {r[0].strip("`"): r[3] for r in cc.parse_rows(_doc())}
     assert {k for k, v in statuses.items() if v == cc.STATUS_TODO} == TODO_KEYS, statuses
     assert set(statuses.values()) <= set(cc.STATUSES)
 
 
 def test_compliance_todo_actions_exist_in_requirements():
-    """待办项引用的「§1 动作 N」必须真实登记（防指向不存在的前置动作）。"""
+    """The "§1 action N" referenced by a to-do item must actually be registered (guarding against pointing at a non-existent prerequisite action)."""
     req = REQUIREMENTS.read_text(encoding="utf-8")
     registered = {int(m.group(1)) for m in re.finditer(r"^\|\s*(\d+)\s*\|", req, re.M)}
     assert registered == set(range(1, 10)), registered

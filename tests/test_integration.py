@@ -1,9 +1,12 @@
-"""集成验证测试：全量结构验证拦截力 + 保真汇总 + 回报四项 +
-物理交叉（合成源 + 真实源集成）。
+"""Integration-validation tests: full structural-validation interception power + fidelity
+summary + four reporting obligations +
+physical cross-check (synthetic source + real-source integration).
 
-真实源集成测试（skipif 数据/制品存在才跑）：物理交叉四组对真实 store 与
-验证参考出数值报告——只验证「报告可出且全部 report 制」，不判数值优劣
-（只报告不拦截）。
+Real-source integration tests (skipif run only when data/artifacts exist): four physical
+cross-check groups produce numerical reports against the real store and
+validation references — they only verify "the report can be produced and everything is
+report-mode", not judging numerical quality
+(report-only, no interception).
 """
 
 import json
@@ -24,7 +27,6 @@ from cubebuild.validate import validate_store
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# ---------------- 合成契约/工具 ----------------
 
 _WGM_LAYER = """
   - id: gravity__wgm2012_bouguer
@@ -61,9 +63,10 @@ def _mapping(tmp_path, layers: str, name="mini.yaml") -> Path:
 
 
 def _write_store(tmp_path, contract, entries, tiers=("1deg",)) -> Path:
-    """合成 store：各层 1° 网格全数组 + manifest（覆盖率 1.0）。
+    """Synthetic store: full arrays on the 1° grid for each layer + manifest (coverage ratio 1.0).
 
-    pixel_area 层填解析公式真值（结构验证有数值=公式逐档核对）。
+    The pixel_area layer is filled with the analytic formula truth (structural validation does
+    a numerical = formula per-tier check).
     """
     from cubebuild.masks import validity_layer_name
     from cubebuild.pixel_area import pixel_area_rows
@@ -97,12 +100,11 @@ def _write_store(tmp_path, contract, entries, tiers=("1deg",)) -> Path:
     return out
 
 
-# ---------------- 全量结构验证拦截力 ----------------
 
 def test_validate_missing_layer_fails(tmp_path):
-    """契约层未入 manifest（全量验证：缺层即 FAIL，不静默跳过）。"""
+    """A contract layer missing from the manifest (full validation: a missing layer FAILs, not silently skipped)."""
     contract = load_contract(_mapping(tmp_path, _WGM_LAYER + _PIXEL_AREA_LAYER))
-    out = _write_store(tmp_path, contract, [contract.layers[0]])   # 只建 wgm
+    out = _write_store(tmp_path, contract, [contract.layers[0]])
 
     report = validate_store(out, contract)
     assert report["result"] == "FAIL"
@@ -112,7 +114,7 @@ def test_validate_missing_layer_fails(tmp_path):
 
 
 def test_validate_manifest_extra_layer_fails(tmp_path):
-    """manifest 多出契约外层 → 集合互检 FAIL。"""
+    """manifest has an extra layer beyond the contract → set cross-check FAIL."""
     contract_big = load_contract(_mapping(tmp_path, _WGM_LAYER + _PIXEL_AREA_LAYER, "big.yaml"))
     out = _write_store(tmp_path, contract_big, list(contract_big.layers))
     contract_small = load_contract(_mapping(tmp_path, _WGM_LAYER, "small.yaml"))
@@ -124,7 +126,7 @@ def test_validate_manifest_extra_layer_fails(tmp_path):
 
 
 def test_validate_full_set_tier_missing_array_fails(tmp_path):
-    """层在 manifest 但 store 1° 档缺数组 → 全集档完整性 FAIL。"""
+    """A layer is in the manifest but the store's 1° tier lacks the array → full-set tier completeness FAIL."""
     two_tier = """
   - id: gravity__wgm2012_bouguer
     source: test
@@ -137,7 +139,6 @@ def test_validate_full_set_tier_missing_array_fails(tmp_path):
     mask: validity
 """
     contract = load_contract(_mapping(tmp_path, two_tier))
-    # store 只放 30min 档（1° 缺失）；manifest 按契约两层档登记
     from cubebuild.masks import validity_layer_name
 
     lat, lon = tier_centers("30min")
@@ -169,7 +170,7 @@ def test_validate_full_set_tier_missing_array_fails(tmp_path):
 
 
 def test_validate_full_contract_passes(tmp_path):
-    """全契约层齐备 → PASS（全量语义的正向用例）。"""
+    """All contract layers present → PASS (positive case for the full-set semantics)."""
     contract = load_contract(_mapping(tmp_path, _WGM_LAYER + _PIXEL_AREA_LAYER))
     out = _write_store(tmp_path, contract, list(contract.layers))
     report = validate_store(out, contract)
@@ -178,7 +179,6 @@ def test_validate_full_contract_passes(tmp_path):
     ]
 
 
-# ---------------- 统计工具 ----------------
 
 def test_pair_stats_linear():
     x = np.linspace(-100, 100, 201)
@@ -196,17 +196,16 @@ def test_pair_stats_mask_and_nan():
     x = np.array([1.0, 2.0, np.nan, 4.0])
     y = np.array([1.0, 2.0, 3.0, np.nan])
     s = cc._pair_stats(x, y)
-    assert s["n"] == 2          # NaN 对剔除
+    assert s["n"] == 2
 
 
-# ---------------- 验证参考读取器（合成源） ----------------
 
 def test_load_crust1_moho(tmp_path):
-    """CRUST1.0 解析：北起行序翻转南起、经度内循环、值域契约。"""
+    """CRUST1.0 parsing: north-first row order flipped to south-first, longitude inner loop, value-range contract."""
     lines = []
     for i in range(180):
         la = 89.5 - i
-        v = -(10.0 + (90.0 - la) / 3.0)      # -10.17..-69.83，值域内
+        v = -(10.0 + (90.0 - la) / 3.0)
         for j in range(360):
             lo = -179.5 + j
             lines.append(f"{lo:.1f}  {la:.1f}  {v:.4f}")
@@ -216,10 +215,8 @@ def test_load_crust1_moho(tmp_path):
 
     arr = cc.load_crust1_moho(src)
     assert arr.shape == (180, 360)
-    # 南起翻转：行 0 = lat -89.5（最深处），行 -1 = lat 89.5（最浅处）
     assert float(arr[0, 0]) == pytest.approx(-(10.0 + 179.5 / 3.0), abs=1e-3)
     assert float(arr[-1, 0]) == pytest.approx(-(10.0 + 0.5 / 3.0), abs=1e-3)
-    # 地标位：85.5E/32.5N → 行 = 32.5-(-89.5) = 122，列 = 85.5+179.5 = 265
     assert float(arr[122, 265]) == pytest.approx(-(10.0 + (90.0 - 32.5) / 3.0), abs=1e-3)
 
 
@@ -227,7 +224,7 @@ def test_load_crust1_moho_rejects_drift(tmp_path):
     src = tmp_path / "crust1.0"
     src.mkdir()
     lines = []
-    for i in range(180):                 # 坐标规则但值域越界（正值向上漂移）
+    for i in range(180):
         la = 89.5 - i
         for j in range(360):
             lines.append(f"{-179.5 + j:.1f}  {la:.1f}  5.0000")
@@ -237,14 +234,13 @@ def test_load_crust1_moho_rejects_drift(tmp_path):
 
 
 def test_load_globsed(tmp_path, monkeypatch):
-    """GlobSed 解析：南起免翻、±180 弃列、极点行常值、Voronoi 胞边。"""
+    """GlobSed parsing: south-first with no flip, ±180 dropped column, polar rows constant, Voronoi cell edges."""
     monkeypatch.setattr(cc, "GLOBSED_EXPECTED", {"shape": (5, 7), "spacing": Fraction(1, 12)})
     nlat, nlon = 5, 7
     z = np.full((nlat, nlon), 500.0, dtype=np.float32)
-    z[2, 3] = np.nan                      # 「陆地」缺测
-    # 源纬度南起：行 0 = lat -90（南极行），行 -1 = 北极行；两极行都须常值
-    z[0, :] = 3101.95                     # 南极行常值
-    z[-1, :] = 1873.60                    # 北极行常值
+    z[2, 3] = np.nan
+    z[0, :] = 3101.95
+    z[-1, :] = 1873.60
     ds = xr.Dataset(
         {"z": (("lat", "lon"), z)},
         coords={
@@ -255,16 +251,15 @@ def test_load_globsed(tmp_path, monkeypatch):
     ds.to_netcdf(tmp_path / "GlobSed-v3.nc", engine="netcdf4")
 
     src = cc.load_globsed(tmp_path)
-    assert src.values.shape == (5, 6)          # 弃 +180 重复列
+    assert src.values.shape == (5, 6)
     assert src.valid.sum() == 5 * 6 - 1
     assert src.lat_edges[0] == -90.0 and src.lat_edges[-1] == 90.0
     assert float(src.lon_res) == pytest.approx(1 / 12)
 
 
-# ---------------- EMAG2 谱一致性（合成） ----------------
 
 def test_continuation_fit_recovers_delta_z():
-    """已知 Δz 的合成上延对 → 谱比拟合恢复 Δz（拟合器的数值正确性）。"""
+    """A synthetic upward-continued pair with a known Δz → spectral-ratio fitting recovers Δz (numerical correctness of the fitter)."""
     rng = np.random.default_rng(0)
     n, res, lat_c = 512, 1.0 / 30.0, 30.0
     f = rng.standard_normal((n, n)).astype(np.float32)
@@ -282,27 +277,26 @@ def test_continuation_fit_recovers_delta_z():
 
 
 def test_continuation_fit_flags_deviant():
-    """非纯上延对（放大版，ratio>1 全带）→ frac_ratio_gt1 诊断满格。"""
+    """A non-pure upward-continued pair (magnified version, ratio>1 across all bands) → frac_ratio_gt1 diagnostic maxed out."""
     rng = np.random.default_rng(1)
     f = rng.standard_normal((256, 256)).astype(np.float32)
     k, p_sea, cnt = cc._radial_power(f, 1.0 / 30.0, 30.0)
     _, p_up, _ = cc._radial_power((2.0 * f).astype(np.float32), 1.0 / 30.0, 30.0)
     with np.errstate(invalid="ignore", divide="ignore"):
-        ratio = p_up / p_sea          # 功率比恒 4（幅度 2×）
+        ratio = p_up / p_sea
     fit = cc._continuation_fit(k, ratio, cnt)
     assert fit["frac_ratio_gt1"] > 0.9
 
 
 def test_emag2_windows_deterministic():
-    """确定性选窗：候选 ≤ N 全取；候选 > N 按纬度均布抽取（防地理偏聚）。"""
+    """Deterministic window selection: candidates ≤ N are all taken; candidates > N are sampled latitude-uniformly (guards against geographic clustering)."""
     valid = np.zeros((1024, 1024), dtype=bool)
     valid[256:512, 256:512] = True
     valid[256:512, 512:768] = True
     wins = cc._emag2_windows(valid, valid, window=256, n_windows=2)
-    assert wins == [(256, 256), (256, 512)]       # 候选 = 2 ≤ N → 全取
+    assert wins == [(256, 256), (256, 512)]
     assert cc._emag2_windows(valid, valid, window=256, n_windows=5) == wins
 
-    # 纬度均布：4 个候选（南→北），取 2 → 首末（最南 + 最北），非「前 2」
     v2 = np.zeros((1024, 1024), dtype=bool)
     for i0 in (0, 256, 512, 768):
         v2[i0:i0 + 256, 0:256] = True
@@ -310,13 +304,15 @@ def test_emag2_windows_deterministic():
     assert wins2 == [(0, 0), (768, 0)]
 
 
-# ---------------- 三元组（合成 store 树） ----------------
 
 def test_crosscheck_triple_synthetic():
-    """恒等式精确成立的合成三层 → 残差 0 / r=1 / 斜率 1（只报告不拦截）。
+    """Synthetic three layers for which the identity holds exactly → residual 0 / r=1 / slope 1
+    (report-only, no interception).
 
-    行 0/3 = 极区（|lat|≥60°），并构造重复计数机制：极区 base ≈ elev
-    （基底已隐含沉积柱）→ 残差 = −sed，签名斜率 ≈ −1。
+    Rows 0/3 = polar regions (|lat|≥60°), and a double-counting mechanism is constructed: in
+    polar regions base ≈ elev
+    (the basement already implicitly contains the sediment column) → residual = −sed, signature
+    slope ≈ −1.
     """
     lat = np.array([-75.0, -25.0, 25.0, 75.0])
     lon = np.array([-150.0, -90.0, -30.0, 30.0, 90.0, 150.0])
@@ -324,7 +320,6 @@ def test_crosscheck_triple_synthetic():
     sed = np.array([[100.0, 500.0, 2000.0, 3000.0, 500.0, 0.0]] * 4, dtype=np.float32)
     base = np.array([[-0.5, -1.0, -2.0, -4.0, -3.0, -1.5]] * 4, dtype=np.float32)
     elev = (base.astype(np.float64) * 1000.0 + sed).astype(np.float32)
-    # 极区两行改成重复计数形态：base 直接贴 elev（隐含沉积），resid = −sed
     base[0] = (elev[0] / 1000.0).astype(np.float32)
     base[3] = (elev[3] / 1000.0).astype(np.float32)
     tree = xr.DataTree.from_dict({
@@ -341,15 +336,12 @@ def test_crosscheck_triple_synthetic():
     checks = cc.crosscheck_triple(tree)
     assert all(c["status"] == "report" for c in checks)
     by_name = {c["name"]: c for c in checks}
-    # 五段统计 + 组说明 + 注记
     assert any("全球" in k for k in by_name)
     assert any("极区" in k for k in by_name)
     assert any("非极区" in k for k in by_name)
-    # 非极区恒等式精确成立（构造行 1/2 未改）
     np_stats = [c for c in checks if "非极区" in c["name"]][0]["stats"]
     assert np_stats["rmse"] == pytest.approx(0.0, abs=1e-3)
     assert np_stats["ols_slope"] == pytest.approx(1.0)
-    # 极区重复计数签名：resid = −sed → 斜率 ≈ −1、corr ≈ −1
     note = [c for c in checks if "已知偏差注记" in c["name"]][0]
     sig = note["polar_signature"]
     assert sig["resid_on_sed_slope"] == pytest.approx(-1.0, abs=1e-6)
@@ -358,7 +350,6 @@ def test_crosscheck_triple_synthetic():
     assert "频段错配" in note["summary"]
 
 
-# ---------------- 保真汇总 ----------------
 
 def _write_json(path: Path, obj) -> Path:
     path.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
@@ -407,21 +398,19 @@ def test_fidelity_summary(tmp_path):
     })
     store = tmp_path / "store.zarr"
     store.mkdir()
-    # 时效基准 = cube_manifest.json（构建终点标记）；zarr.json 是建库起点
     zj = store / "cube_manifest.json"
     zj.write_text("{}", encoding="utf-8")
-    # alpha 报告早于最终构建 → stale；beta 晚于 → fresh
     old = zj.stat().st_mtime - 100
     os.utime(reports / "fidelity-alpha.json", (old, old))
 
     summary = ci.fidelity_summary(reports, contract, store)
-    assert summary["result"] == "FAIL"                       # beta 超容差
+    assert summary["result"] == "FAIL"
     assert summary["n_reports"] == 2
     assert summary["per_layer"]["alpha"]["families"] == ["积分量", "分位数", "距离抽样"]
     fails = summary["per_layer"]["beta"]["fails"]
     assert len(fails) == 1 and "不一致像元 3" in fails[0]["summary"]
     cov = {c["name"]: c for c in summary["checks"]}
-    assert cov["保真报告覆盖（契约层 ↔ fidelity 报告）"]["status"] == "pass"  # pixel_area 例外
+    assert cov["保真报告覆盖（契约层 ↔ fidelity 报告）"]["status"] == "pass"
     assert "alpha" in cov["保真报告时效性（vs 最终构建时间；报告制）"]["summary"]
 
 
@@ -439,7 +428,7 @@ def test_fidelity_summary_missing_report_fails(tmp_path):
 
 
 def test_fidelity_summary_excludes_itself(tmp_path):
-    """fidelity-summary.json 自身不得被 glob 计入逐层清单（自我包含防护）。"""
+    """fidelity-summary.json itself must not be counted by the glob in the per-layer list (self-inclusion guard)."""
     contract = load_contract(_mapping(tmp_path, _WGM_LAYER))
     reports = tmp_path / "reports"
     reports.mkdir()
@@ -457,8 +446,7 @@ def test_fidelity_summary_excludes_itself(tmp_path):
 
 
 def test_crosscheck_none_src_dir_uses_default(tmp_path, monkeypatch):
-    """integration 以 .get() 传 None → 交叉函数须落缺省路径（不 TypeError）。"""
-    # CRUST1.0 合成源 + monkeypatch 缺省目录
+    """integration passes None via .get() → the cross-check function must fall back to the default path (no TypeError)."""
     src = tmp_path / "crust1"
     src.mkdir()
     lines = []
@@ -478,12 +466,11 @@ def test_crosscheck_none_src_dir_uses_default(tmp_path, monkeypatch):
                 ("lat", "lon"), np.ones((180, 360), dtype=np.uint8)),
         }),
     })
-    checks = cc.crosscheck_gemma_vs_crust1(tree, None)   # None → 缺省路径
+    checks = cc.crosscheck_gemma_vs_crust1(tree, None)
     assert len(checks) == 4
     assert all(c["status"] == "report" for c in checks)
 
 
-# ---------------- 构建回报四项 ----------------
 
 def _obligations_env(tmp_path):
     reports = tmp_path / "reports"
@@ -532,11 +519,10 @@ def test_build_obligations_missing_artifact_fails(tmp_path):
     assert by_name["回报① GHFDB/NGHF 整编核实结论"]["status"] == "pass"
 
 
-# ---------------- 集成总报告（接线 + 判据组合） ----------------
 
 def _stub_crosschecks(monkeypatch, fail_group=None):
-    """stub 打在 crosscheck 模块（统一装配 assemble_crosscheck_groups 在
-    该模块内调用这些函数名）。"""
+    """The stubs are placed on the crosscheck module (the unified assembly
+    assemble_crosscheck_groups calls these function names within that module)."""
     def _ok(group):
         def fn(*a, **k):
             return [{"name": f"{group}: 合成交叉", "status": "report", "summary": "ok"}]
@@ -562,10 +548,9 @@ def test_build_integration_report_pass(tmp_path, monkeypatch):
     report = ci.build_integration_report(store, contract, reports)
     assert report["result"] == "PASS"
     assert report["structure"]["result"] == "PASS"
-    assert report["fidelity"]["result"] == "PASS"     # pixel_area 例外
+    assert report["fidelity"]["result"] == "PASS"
     assert report["obligations"]["result"] == "PASS"
     assert report["crosscheck"]["n_groups"] == 4
-    # 分报告落盘
     for name in ("integration-report.json", "structure-validation.json",
                  "fidelity-summary.json", "build-obligations.json",
                  "physical-crosscheck.json"):
@@ -573,7 +558,7 @@ def test_build_integration_report_pass(tmp_path, monkeypatch):
 
 
 def test_build_integration_report_judgement_combination(tmp_path, monkeypatch):
-    """判据组合：回报缺失 / 交叉组执行失败任一 → 总 FAIL。"""
+    """Judgement combination: a missing reporting obligation / a failed cross-check group — either one → overall FAIL."""
     reports, store = _obligations_env(tmp_path)
     contract = load_contract(_mapping(tmp_path, _PIXEL_AREA_LAYER))
 
@@ -589,7 +574,7 @@ def test_build_integration_report_judgement_combination(tmp_path, monkeypatch):
                     "n_v1_1_candidates": 170}), encoding="utf-8")
     _stub_crosschecks(monkeypatch, fail_group="EMAG2")
     report = ci.build_integration_report(store, contract, reports)
-    assert report["result"] == "FAIL"                 # 交叉组执行失败计 FAIL
+    assert report["result"] == "FAIL"
 
 
 def test_integrate_cli(tmp_path, monkeypatch):
@@ -605,7 +590,6 @@ def test_integrate_cli(tmp_path, monkeypatch):
     assert rep["result"] == "PASS"
 
 
-# ---------------- 真实源集成（存在时执行） ----------------
 
 @pytest.mark.skipif(
     not (REPO_ROOT / "products/cube-v1.0.zarr").is_dir()
@@ -615,13 +599,12 @@ def test_integrate_cli(tmp_path, monkeypatch):
     reason="真实 store 或验证参考源不存在",
 )
 def test_crosscheck_real_store():
-    """四组物理交叉对真实 store 出数值报告（只验证可出且全 report 制）。"""
+    """Four physical cross-check groups produce numerical reports against the real store (only verifying they can be produced and are all report-mode)."""
     report = cc.build_crosscheck_report(REPO_ROOT / "products/cube-v1.0.zarr")
     assert report["n_groups"] == 4
     for g in report["groups"]:
         assert g["checks"], g["group"]
         assert all(c["status"] == "report" for c in g["checks"])
-    # 数值合理性抽样：三元组全球 n = 64800；EMAG2 拟合有限
     triple = report["groups"][0]["checks"]
     stats = [c["stats"] for c in triple if "stats" in c][0]
     assert stats["n"] == 64800

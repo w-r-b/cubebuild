@@ -1,22 +1,34 @@
-"""开源要件判据：许可、README、依赖声明、引用元数据与 CI 工作流。
+"""Open-source-essentials criteria: licence, README, dependency declaration,
+citation metadata and CI workflow.
 
-五项判据对仓库根目录本体检查（导出为逐字复制，故产物内同源）：
-① LICENSE 为 MIT 全文（标志段落齐备）；
-② README 六段锚点（定位／安装／复现边界／数据／引用／许可）齐备；复现边界段
-   显式声明「约 22 GB 原始数据、部分不可再分发、不可由公开件重建、读者应使用
-   公开版」；许可段显式分列代码 MIT 与数据 CC BY 4.0；并声明 CI 覆盖边界
-   （完整套件需本地数据，不在 CI 覆盖）；
-③ pyproject.toml 可解析：包名、版本（与管线包 __version__ 一致）、requires-python、
-   依赖集合（与包内第三方 import 全集逐一对应）、命令行入口、MIT 许可、构建后端；
-④ CITATION.cff 可解析：作者（姓名／ORCID／机构）、版本、DOI、MIT 许可，
-   并显式分列数据侧 CC BY 4.0；
-⑤ CI 工作流存在，范围与 README 声明一致（可编辑安装＋import 冒烟＋命令行冒烟＋
-   两份纯算法测试），Python 3.11 单档。
+Five criteria checked against the repository root itself (the export is a
+verbatim copy, so the artifact is homologous):
+① LICENSE is the full MIT text (marker paragraphs present);
+② README has the six section anchors (positioning / installation / reproduction
+   scope / data / citation / licence); the reproduction-scope section explicitly
+   states "about 22 GB of raw data, part of it not redistributable, not
+   rebuildable from the public artifacts, readers should use the public
+   version"; the licence section explicitly separates code MIT and data
+   CC BY 4.0; and it declares the CI coverage boundary (the full suite needs
+   local data, not covered by CI);
+③ pyproject.toml parses: package name, version (consistent with the pipeline
+   package __version__), requires-python, dependency set (one-to-one with the
+   full set of third-party imports in the package), console entry point, MIT
+   licence, build backend;
+④ CITATION.cff parses: author (name / ORCID / affiliation), version, DOI, MIT
+   licence, and explicitly separates the data-side CC BY 4.0;
+⑤ a CI workflow exists whose scope matches what README declares (editable
+   install + import smoke + console smoke + two pure-algorithm tests), single
+   Python 3.11 track.
 
-负例（合成件）：许可文本被替换、复现边界句被删、依赖声明缺入口、依赖声明缺版本、
-引用元数据缺版本——各自必须失败。私有侧机制（导出入口、痕迹扫描器）不在本工作区时，
-相应核对整体跳过（沿用缺件跳过惯例）；本模块自身受公开面痕迹扫描约束，受词表约束的
-字面量按运行时拼接构造。
+Negative cases (synthetic artifacts): licence text replaced, reproduction-boundary
+sentence deleted, dependency declaration missing entry point, dependency
+declaration missing version, citation metadata missing version — each must fail.
+When the private-side mechanisms (export entry point, trace scanner) are absent
+from this workspace, the corresponding checks are skipped wholesale (following
+the missing-artifact skip convention); this module itself is subject to the
+public-face trace scan, so wordlist-constrained literals are built by runtime
+concatenation.
 """
 
 from __future__ import annotations
@@ -34,7 +46,6 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 
-# ---------- 判据本体 ----------
 
 MIT_MARKERS = (
     "MIT License",
@@ -43,7 +54,6 @@ MIT_MARKERS = (
     "WITHOUT WARRANTY OF ANY KIND",
 )
 
-# README 六段锚点：段名 → 标题关键字（小写包含匹配）
 SECTION_ANCHORS = (
     ("定位（管线而非数据集）", ("what this repository is", "positioning")),
     ("安装", ("installation",)),
@@ -53,7 +63,6 @@ SECTION_ANCHORS = (
     ("许可", ("licence", "license")),
 )
 
-# 复现边界段四事实（必须落在该段正文内）
 REPRODUCTION_FACTS = (
     (r"22\s*gb", "约 22 GB 原始数据"),
     (r"cannot be redistributed", "部分原始数据不可再分发"),
@@ -61,13 +70,10 @@ REPRODUCTION_FACTS = (
     (r"public version", "读者应使用公开版"),
 )
 
-# 许可段须显式分列的两侧口径
 LICENCE_SEPARATION = ("mit", "cc by 4.0")
 
-# CI 覆盖边界声明（全 README 范围内）
 CI_COVERAGE_MARKERS = ("not covered by ci", "full test suite")
 
-# 包内第三方 import → 声明的发行名（PyPI 名）
 DIST_BY_IMPORT = {
     "dask": "dask",
     "geopandas": "geopandas",
@@ -104,7 +110,7 @@ def _package_version(root: Path) -> str | None:
 
 
 def check_licence(root: Path) -> list[str]:
-    """LICENSE 必须是 MIT 全文（标志段落齐备）。"""
+    """LICENSE must be the full MIT text (marker paragraphs present)."""
     p = root / "LICENSE"
     if not p.is_file():
         return ["LICENSE 缺失"]
@@ -113,7 +119,8 @@ def check_licence(root: Path) -> list[str]:
 
 
 def _sections(text: str) -> dict[str, str]:
-    """README → {小写标题: 段正文}（仅二级标题分段）。"""
+    """README → {lowercase heading: section body} (split by level-2 headings
+    only)."""
     sections: dict[str, str] = {}
     cur: str | None = None
     for line in text.splitlines():
@@ -133,7 +140,8 @@ def _section_body(sections: dict[str, str], keywords: tuple[str, ...]) -> str | 
 
 
 def check_readme(root: Path) -> list[str]:
-    """README 六段锚点＋复现边界四事实＋许可分列＋CI 覆盖边界。"""
+    """README six section anchors + reproduction-boundary four facts + licence
+    separation + CI coverage boundary."""
     p = root / "README.md"
     if not p.is_file():
         return ["README.md 缺失"]
@@ -178,7 +186,8 @@ def _third_party_imports(pkg_dir: Path) -> set[str]:
 
 
 def check_pyproject(root: Path) -> list[str]:
-    """依赖声明：包名／版本／requires-python／依赖集合／入口／许可／构建后端。"""
+    """Dependency declaration: package name / version / requires-python /
+    dependency set / entry point / licence / build backend."""
     p = root / "pyproject.toml"
     if not p.is_file():
         return ["pyproject.toml 缺失"]
@@ -229,7 +238,8 @@ def check_pyproject(root: Path) -> list[str]:
 
 
 def check_citation(root: Path) -> list[str]:
-    """引用元数据：作者（姓名／ORCID／机构）、版本、DOI、MIT 许可。"""
+    """Citation metadata: author (name / ORCID / affiliation), version, DOI,
+    MIT licence."""
     p = root / "CITATION.cff"
     if not p.is_file():
         return ["CITATION.cff 缺失"]
@@ -263,7 +273,8 @@ def check_citation(root: Path) -> list[str]:
 
 
 def check_ci(root: Path) -> list[str]:
-    """CI 工作流：存在，且范围与 README 声明一致（不跑超范围测试）。"""
+    """CI workflow: exists and its scope matches what README declares (does not
+    run out-of-scope tests)."""
     workflows = sorted((root / ".github" / "workflows").glob("*.y*ml"))
     if not workflows:
         return ["缺少 .github/workflows/*.yml"]
@@ -280,7 +291,6 @@ def check_ci(root: Path) -> list[str]:
     return problems
 
 
-# ---------- 本仓本体判据 ----------
 
 
 def test_licence_mit_full_text():
@@ -304,7 +314,8 @@ def test_ci_workflow_scope_matches_readme():
 
 
 def test_cli_entry_smoke():
-    """命令行入口可跑通（模块入口；控制台脚本由 CI 的可编辑安装冒烟覆盖）。"""
+    """Console entry point runs (module entry; the console script is covered by
+    the CI editable-install smoke)."""
     version = _package_version(REPO)
     assert version, "管线包缺 __version__"
     r = subprocess.run(
@@ -315,7 +326,6 @@ def test_cli_entry_smoke():
     assert r.stdout.strip() == f"cubebuild {version}"
 
 
-# ---------- 与私有侧机制的联动 ----------
 
 
 def _find_private(name: str) -> Path | None:
@@ -331,7 +341,8 @@ TRACE_SCAN = _find_private("trace_scan.py")
 
 @pytest.mark.skipif(EXPORT_ENTRY is None, reason="私有侧导出机制不在本工作区（公开仓不带导出自身逻辑）")
 def test_exported_artifact_essentials_pass(tmp_path):
-    """导出产物内五件要件齐备且自洽（对产物本体检查，非源文件）。"""
+    """The five essentials are complete and self-consistent inside the exported
+    artifact (checked against the artifact itself, not the source files)."""
     spec = importlib.util.spec_from_file_location("export_public", EXPORT_ENTRY)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -349,7 +360,9 @@ def test_exported_artifact_essentials_pass(tmp_path):
 
 @pytest.mark.skipif(TRACE_SCAN is None, reason="私有侧痕迹扫描器不在本工作区")
 def test_essentials_trace_free():
-    """五件要件文本零内部痕迹（LICENSE 无后缀，不在导出预检的扫描扩展名内，此处补齐）。"""
+    """The five essentials' text has zero internal traces (LICENSE has no suffix
+    and is not within the export precheck's scanned extensions, so it is covered
+    here)."""
     spec = importlib.util.spec_from_file_location("trace_scan", TRACE_SCAN)
     ts = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ts)
@@ -359,7 +372,6 @@ def test_essentials_trace_free():
     assert hits == {}
 
 
-# ---------- 负例（合成件；每条判据须能被证伪） ----------
 
 MIT_SAMPLE = """MIT License
 
@@ -484,7 +496,8 @@ def _all_problems(root: Path) -> list[str]:
 
 
 def test_synthetic_root_passes_baseline(tmp_path):
-    """合成件基准：齐备时全过（保证下述负例由变异触发，而非基线故障）。"""
+    """Synthetic artifact baseline: all pass when complete (ensures the negative
+    cases below are triggered by mutation, not a baseline fault)."""
     assert _all_problems(_good_root(tmp_path)) == []
 
 

@@ -1,7 +1,9 @@
-"""测试：0.1° 像元键（左闭/边界鲁棒/日期线）+ 合并去重规则（合成
-源）+ 读取器契约（形状/网格自洽/非有限拒绝）+ 双层构建器（密度 attrs /
-HFgrid14 相位恒等与 1° 加权）+ 侧车往返 + 真实源基线（合并三数/整编核实
-证据数字）+ e2e（双层入 store、manifest 溯源、保真 PASS、侧车落格还原）。
+"""Tests: 0.1° pixel keys (left-closed / boundary-robust / dateline) + merge-dedup rule
+(synthetic sources) + reader contract (shape / grid self-consistency / non-finite
+rejection) + two-layer builders (density attrs / HFgrid14 phase identity and 1° weighting)
++ sidecar round-trip + real-source baselines (merged triple numbers / incorporation-evidence
+figures) + e2e (two layers into the store, manifest provenance, fidelity PASS, sidecar
+round-trip density reconstruction).
 """
 
 from fractions import Fraction
@@ -64,10 +66,9 @@ def _hfgrid_entry(visibility="public"):
     )
 
 
-# ---------------- 0.1° 像元键 ----------------
 
 def test_pixel_keys_basic_partition():
-    """左闭分区：0.05 与 0.15 异键；0.09 与 0.1 异键（0.1 归上胞）。"""
+    """Left-closed partition: 0.05 and 0.15 get different keys; 0.09 and 0.1 get different keys (0.1 falls into the upper cell)."""
     a = pixel_keys([0.05], [0.05])
     b = pixel_keys([0.15], [0.15])
     assert a[0] != b[0]
@@ -75,24 +76,27 @@ def test_pixel_keys_basic_partition():
 
 
 def test_pixel_keys_boundary_robustness():
-    """十进制边界点（23.3）确定性归上胞：浮点噪声等价点同键、
-    真邻域值（23.29999）异键——裸除法在此非确定（实证 3808 点受扰）。"""
+    """A decimal boundary point (23.3) deterministically falls into the upper cell: a
+    float-noise-equivalent point gets the same key while a true neighbouring value (23.29999)
+    gets a different key — bare division is non-deterministic here (measured: 3808 points
+    perturbed)."""
     base = pixel_keys([23.3], [10.0])
-    noise = pixel_keys([23.300000000000004], [10.0])   # float 噪声等价
+    noise = pixel_keys([23.300000000000004], [10.0])
     below = pixel_keys([23.29999], [10.0])
     assert base[0] == noise[0]
     assert base[0] != below[0]
 
 
 def test_pixel_keys_dateline():
-    """经度卷绕：180 ≡ −180 同键；179.95 与 −179.95 属相邻不同像元。"""
+    """Longitude wrapping: 180 ≡ −180 get the same key; 179.95 and −179.95 belong to adjacent but different pixels."""
     assert pixel_keys([5.0], [180.0])[0] == pixel_keys([5.0], [-180.0])[0]
     assert pixel_keys([5.0], [179.95])[0] != pixel_keys([5.0], [-179.95])[0]
 
 
 def test_pixel_keys_matches_exact_decimal_reference():
-    """独立路径：随机 4 位小数坐标（含边界值），键 == 十进制精确算术
-    （Fraction）floor——左闭约定两路径一致。"""
+    """Independent path: for random 4-decimal coordinates (including boundary values) the
+    keys equal the decimal exact-arithmetic (Fraction) floor — the left-closed convention is
+    consistent across both paths."""
     rng = np.random.default_rng(7)
     lat = rng.uniform(-89, 89, 3000).round(4)
     lon = rng.uniform(-180, 180, 3000).round(4)
@@ -103,7 +107,6 @@ def test_pixel_keys_matches_exact_decimal_reference():
         assert keys[i] == int(r) * 3600 + int(c), f"点 {i}: {lat[i]}, {lon[i]}"
 
 
-# ---------------- 合并去重（合成源，monkeypatch 读取器） ----------------
 
 def _synth_ghfdb():
     import pandas as pd
@@ -126,8 +129,6 @@ def _synth_nghf():
         "q": [51.0, 61.0, 62.0, 71.0, 81.0, np.nan],
         "q_uncertainty": [np.nan] * 6,
         "name": ["n1", "n2", "n3", "n4", "n5", "n6"],
-        # n1 同像元(10.05 侧)；n2 同像元(10.15 侧)；n3 边界 10.1 → [10.1,10.2)
-        # 与 g2(10.15) 同像元；n4 经度空不可定位；n5 新像元；n6 日期线卷绕同 g3
         "lat": [10.08, 10.12, 10.1, 6.0, 12.0, 5.0],
         "lon": [20.08, 20.18, 20.1, np.nan, 21.0, 180.0],
         "reference": ["N1", "N2", "N3", "N4", "N5", "N6"],
@@ -136,8 +137,9 @@ def _synth_nghf():
 
 
 def test_merge_rule_synthetic(monkeypatch):
-    """规则逐案验证：同像元滤除（含 0.1 边界点与日期线卷绕）、新像元保留、
-    不可定位排除、GHFDB 全保留、source/source_row 溯源。"""
+    """Rule verified case by case: same-pixel filtering (including the 0.1 boundary point and
+    dateline wrapping), new-pixel retention, exclusion of non-locatable points, full retention
+    of GHFDB, and source/source_row provenance."""
     monkeypatch.setattr(th, "load_ghfdb", lambda *a, **k: _synth_ghfdb())
     monkeypatch.setattr(th, "load_nghf", lambda *a, **k: _synth_nghf())
     monkeypatch.setattr(th, "NGHF_SUPPLEMENT", 1)
@@ -146,30 +148,23 @@ def test_merge_rule_synthetic(monkeypatch):
     assert len(df) == 6
     assert (df["source"] == "GHFDB").sum() == 5
     kept = df[df["source"] == "NGHF"]
-    # n5（12.0, 21.0 新像元）唯一保留——n6（5.0, 180.0 ≡ −180 → 与 g3
-    # (−179.95) 同像元 [−180,−179.9)）被日期线卷绕滤除
     assert list(kept["name"]) == ["n5"]
-    # 逐案：同像元三案 + 卷绕案 + 不可定位案全滤除
     names = set(df["name"])
     for dropped in ("n1", "n2", "n3", "n4", "n6"):
         assert dropped not in names
-    # 溯源列：GHFDB source_row 0..4；NGHF 保留原行号（n5 = 源第 4 行）
     g_part = df[df["source"] == "GHFDB"]
     assert list(g_part["source_row"]) == [0, 1, 2, 3, 4]
     assert list(df.loc[df["source"] == "NGHF", "source_row"]) == [4]
 
 
 def test_merge_rejects_contract_drift(monkeypatch):
-    """源漂移（补充点数偏离契约）显式失败。"""
+    """Source drift (supplement count deviating from the contract) fails explicitly."""
     monkeypatch.setattr(th, "load_ghfdb", lambda *a, **k: _synth_ghfdb())
     monkeypatch.setattr(th, "load_nghf", lambda *a, **k: _synth_nghf())
-    # 不 patch 契约常量 → 合成源 1 补充 ≠ 期望 5186 → 显式失败
-    # （用另一 src 路径避开进程内合并缓存）
     with pytest.raises(ValueError, match="补充点数"):
         th.merge_heatflow_points("x-drift", "y-drift")
 
 
-# ---------------- 读取器契约 ----------------
 
 def _write_ghfdb_xlsx(path, n_data_rows, n_cols=67):
     import openpyxl
@@ -182,7 +177,7 @@ def _write_ghfdb_xlsx(path, n_data_rows, n_cols=67):
         "q", "q_uncertainty", "name", "lat_NS", "long_EW",
         "publication_reference", "ID",
     )
-    for _ in range(5):                      # M/R/O、B,S、U score、单位、长名
+    for _ in range(5):
         ws.append(["x"] * n_cols)
     ws.append(names)
     for i in range(n_data_rows):
@@ -242,7 +237,7 @@ def test_load_hfgrid14_rejects_wrong_shape(tmp_path):
 
 
 def _hfgrid_rows(n=259200):
-    """完整 0.5° 全球网格行（北起行序，同源约定）。"""
+    """Rows of the complete 0.5° global grid (north-first row order, same convention as the source)."""
     return [f"{-179.75 + (i % 720) * 0.5};{89.75 - (i // 720) * 0.5};1;;"
             for i in range(n)]
 
@@ -250,7 +245,7 @@ def _hfgrid_rows(n=259200):
 def test_load_hfgrid14_rejects_duplicate_cells(tmp_path):
     p = tmp_path / "HFgrid14.csv"
     rows = ["longiyude;latitude;HF_pred;sHF_pred;Hf_obs"] + _hfgrid_rows()
-    rows[2] = rows[1]                          # 首胞重复 → 非完整网格
+    rows[2] = rows[1]
     p.write_text("\n".join(rows) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="非完整网格"):
         th.load_hfgrid14(tmp_path)
@@ -259,7 +254,7 @@ def test_load_hfgrid14_rejects_duplicate_cells(tmp_path):
 def test_load_hfgrid14_rejects_offgrid_center(tmp_path):
     p = tmp_path / "HFgrid14.csv"
     rows = ["longiyude;latitude;HF_pred;sHF_pred;Hf_obs"] + _hfgrid_rows()
-    rows[1] = "-179.75;89.749;100;10;"         # 非规则网格中心
+    rows[1] = "-179.75;89.749;100;10;"
     p.write_text("\n".join(rows) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="偏离"):
         th.load_hfgrid14(tmp_path)
@@ -268,13 +263,12 @@ def test_load_hfgrid14_rejects_offgrid_center(tmp_path):
 def test_load_hfgrid14_rejects_nonfinite_pred(tmp_path):
     p = tmp_path / "HFgrid14.csv"
     rows = ["longiyude;latitude;HF_pred;sHF_pred;Hf_obs"] + _hfgrid_rows()
-    rows[1] = "-179.75;89.75;abc;10;"          # 非数值 HF_pred
+    rows[1] = "-179.75;89.75;abc;10;"
     p.write_text("\n".join(rows) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="非有限"):
         th.load_hfgrid14(tmp_path)
 
 
-# ---------------- HFgrid14 构建器（相位核） ----------------
 
 def _synth_hfgrid_source(values_2d):
     from cubebuild.gravmag import RasterSource
@@ -291,7 +285,7 @@ def _synth_hfgrid_source(values_2d):
 
 
 def test_hfgrid14_home_tier_identity(monkeypatch):
-    """30′ 档恒等（源胞边对齐 -180/-90 + lon_phase=0.25）：位级一致。"""
+    """Identity at the 30′ tier (source-cell edges aligned to -180/-90 + lon_phase=0.25): bit-for-bit equality."""
     rng = np.random.default_rng(3)
     vals = rng.uniform(20, 150, (360, 720))
     monkeypatch.setattr(th, "_hfgrid14_source",
@@ -301,7 +295,7 @@ def test_hfgrid14_home_tier_identity(monkeypatch):
 
 
 def test_hfgrid14_1deg_column_pairing(monkeypatch):
-    """1° 档 = 2×2 源块面积加权平均：列恒等场 → 相邻列对均值精确。"""
+    """1° tier = area-weighted mean of 2×2 source blocks: with a column-constant field the adjacent column pair's mean is exact."""
     vals = np.tile(np.arange(720, dtype=np.float64), (360, 1))
     monkeypatch.setattr(th, "_hfgrid14_source",
                         lambda *a, **k: _synth_hfgrid_source(vals))
@@ -312,7 +306,7 @@ def test_hfgrid14_1deg_column_pairing(monkeypatch):
 
 
 def test_hfgrid14_attrs_model_marker(monkeypatch):
-    """manifest 溯源字段：product_type=model + license_note + doi。"""
+    """Manifest provenance fields: product_type=model + license_note + doi."""
     monkeypatch.setattr(th, "_hfgrid14_source",
                         lambda *a, **k: _synth_hfgrid_source(np.zeros((360, 720))))
     attrs = th.build_hfgrid14_heatflow(_hfgrid_entry(), "30min").attrs
@@ -322,7 +316,6 @@ def test_hfgrid14_attrs_model_marker(monkeypatch):
     assert "missing_value" not in attrs and "_FillValue" not in attrs
 
 
-# ---------------- 密度层构建器 ----------------
 
 def test_density_builder_attrs(monkeypatch):
     home = np.zeros((3600, 7200), dtype=np.uint32)
@@ -339,11 +332,10 @@ def test_density_builder_attrs(monkeypatch):
     assert "missing_value" not in arr.attrs and "_FillValue" not in arr.attrs
 
 
-# ---------------- 真实源基线（磁盘实证的契约化） ----------------
 
 @requires_heatflow
 def test_real_merge_baseline():
-    """合并三数：GHFDB 91182 全可定位 + NGHF 补充 5186 = 96368。"""
+    """Merged triple numbers: GHFDB 91182 all locatable + NGHF supplement 5186 = 96368."""
     g = th.load_ghfdb()
     assert len(g) == GHFDB_EXPECTED_ROWS
     assert g["lat"].notna().all() and g["lon"].notna().all()
@@ -362,7 +354,7 @@ def test_real_merge_baseline():
 
 @requires_heatflow
 def test_real_incorporation_evidence():
-    """整编核实证据数字：坐标重合/q 一致/像元重叠。"""
+    """Incorporation-evidence figures: coordinate coincidence / q agreement / pixel overlap."""
     ev = th.verify_nghf_incorporation()
     assert ev["exact_coord_matches"] == NGHF_EXACT_COORD_MATCHES
     assert ev["q_comparable"] == NGHF_Q_COMPARABLE
@@ -370,7 +362,6 @@ def test_real_incorporation_evidence():
     assert ev["pixel_overlap"] == NGHF_PIXEL_OVERLAP
     assert ev["supplement"] == NGHF_SUPPLEMENT
     assert ev["nghf_locatable"] == NGHF_EXPECTED_LOCATABLE
-    # 主体整编但未完全 → 合并而非整体转验证参考
     assert 0.7 < ev["exact_coord_matches"] / ev["nghf_locatable"] < 0.9
 
 
@@ -378,15 +369,13 @@ def test_real_incorporation_evidence():
 def test_real_hfgrid14_baseline():
     src = th.load_hfgrid14()
     assert src.values.shape == (360, 720)
-    assert src.valid.all()                       # 预测场全球全覆盖
+    assert src.valid.all()
     assert float(np.nanmin(src.values)) == -6.0
     assert 2900 < float(np.nanmax(src.values)) < 3000
-    # 30′ 档位级恒等（相位正确性真实源实证）
     arr = th.build_hfgrid14_heatflow(_hfgrid_entry(), "30min").compute().values
     assert np.array_equal(arr, src.values)
 
 
-# ---------------- 侧车导出 ----------------
 
 def test_export_sidecar_missing_source(tmp_path):
     from cubebuild.sidecars import export_heatflow_points_merged
@@ -403,8 +392,6 @@ def test_export_heatflow_sidecar_roundtrip(tmp_path):
 
     rec = export_heatflow_points_merged(tmp_path)
     assert rec["id"] == "heatflow_points_merged"
-    # 热流部分退出：合并点侧车（含 NGHF 记录
-    # 本体）转 internal；密度层（聚合分析产物）维持公开
     assert rec["visibility"] == "internal"
     assert rec["n_features"] == MERGED_TOTAL
     assert rec["n_ghfdb"] == GHFDB_EXPECTED_ROWS
@@ -412,13 +399,12 @@ def test_export_heatflow_sidecar_roundtrip(tmp_path):
     back = gpd.read_parquet(tmp_path / "heatflow_points_merged.parquet")
     assert len(back) == MERGED_TOTAL
     assert back.crs.to_epsg() == 4326
-    assert back.geometry.isna().sum() == 0        # 合并集全部可定位
+    assert back.geometry.isna().sum() == 0
     for col in ("source", "source_row", "name", "lat", "lon", "q",
                 "q_uncertainty", "reference", "id"):
         assert col in back.columns
     assert set(back["source"].unique()) == {"GHFDB", "NGHF"}
     assert back.loc[back["source"] == "NGHF", "id"].isna().all()
-    # GHFDB 行 id 与源记录一一对应（抽 3 行回查）
     g = th.load_ghfdb()
     for i in (0, 50000, GHFDB_EXPECTED_ROWS - 1):
         row = back.iloc[i]
@@ -426,7 +412,6 @@ def test_export_heatflow_sidecar_roundtrip(tmp_path):
         assert row["lat"] == pytest.approx(g.iloc[i]["lat"], abs=1e-9)
 
 
-# ---------------- e2e：双层全链路 ----------------
 
 _MINI = """
 version: test
@@ -459,9 +444,10 @@ layers:
 @requires_heatflow
 @requires_hfgrid
 def test_thermal_e2e(tmp_path, monkeypatch):
-    """双层全链路：build → 结构验证 PASS → manifest（count_semantics/
-    composite_rule/product_type=模型标注/validity 链接）→ 保真 PASS
-    （密度含整编核实硬判据）→ 侧车落格还原密度层（互查项）。"""
+    """Two-layer full chain: build → structural validation PASS → manifest (count_semantics /
+    composite_rule / product_type=model marker / validity link) → fidelity PASS (density
+    includes the incorporation-evidence hard criterion) → sidecar round-trip reconstructs the
+    density layer (cross-check item)."""
     import cubebuild.cli
     import geopandas as gpd
     import xarray as xr
@@ -492,18 +478,16 @@ def test_thermal_e2e(tmp_path, monkeypatch):
     assert "validity_mask" not in d
     h = entries[HFGRID14_ID]
     assert h["dtype"] == "float32"
-    assert h["product_type"].startswith("model")       # 模型产品标注（验收项）
+    assert h["product_type"].startswith("model")
     assert h["validity_mask"] == "thermal__hfgrid14_heatflow__validity"
     assert h["coverage"] == {"1deg": 1.0, "30min": 1.0}
     assert [s["id"] for s in manifest["sidecars"]] == ["heatflow_points_merged"]
 
-    # 保真：密度（逐位/计数守恒/整编核实）+ HFgrid14（逐位/积分/分位数）
     for eid, tiers in ((HEATFLOW_DENSITY_ID, ["1deg", "3min"]),
                        (HFGRID14_ID, ["1deg", "30min"])):
         report = th.build_thermal_fidelity_report(out, eid, tiers)
         assert report["result"] == "PASS", report["checks"]
 
-    # 互查：侧车点按坐标落像元 == 密度层 3′ 档逐位
     with xr.open_datatree(out, engine="zarr", chunks={}) as dt:
         store_density = dt["/3min"].ds[HEATFLOW_DENSITY_ID].values
     back = gpd.read_parquet(sidecars_dir / "heatflow_points_merged.parquet")
@@ -512,7 +496,6 @@ def test_thermal_e2e(tmp_path, monkeypatch):
         points_to_density(back.geometry.y, back.geometry.x, "3min"),
         store_density,
     )
-    # HFgrid14 30′ 档与源位级一致（e2e 再证一次经 store 往返）
     with xr.open_datatree(out, engine="zarr", chunks={}) as dt:
         store_hf = dt["/30min"].ds[HFGRID14_ID].values
     assert np.array_equal(store_hf, th.load_hfgrid14().values)

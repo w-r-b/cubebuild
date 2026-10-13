@@ -1,8 +1,10 @@
-"""公开导出器测试：许可证状态分支规则 + internal 剥离 + 公开 store 数值保真
-+ manifest 缺口注记 + 侧车复制 + dry-run 不落盘。
+"""Public-exporter tests: licence-status branching rules + internal stripping +
+public-store numeric fidelity + manifest gap notes + sidecar copying + dry-run
+writes nothing.
 
-合成 store 含 2D 公开层（NaN 值保真）、internal 层（带掩膜）、3D 层组
-（组节点剥离路径）与 pixel_area 解析值（结构验证数值核对项）。
+The synthetic store contains a 2D public layer (NaN-value fidelity), an internal
+layer (with mask), a 3D layer group (group-node stripping path) and pixel_area
+analytic values (numeric check item for structural validation).
 """
 
 import json
@@ -31,7 +33,6 @@ from cubebuild.pubexport import (
 )
 from cubebuild.validate import validate_store
 
-# ---------------- 合成契约 / store ----------------
 
 _LAYERS = """
   - id: derived__pixel_area
@@ -101,7 +102,8 @@ def _mapping(tmp_path, layers: str = _LAYERS) -> Path:
 
 
 def _write_full_store(tmp_path, contract) -> Path:
-    """合成完整 store：五层数组（含 3D 组节点与 NaN）+ manifest + 侧车文件。"""
+    """Synthesize a full store: five-layer arrays (including a 3D group node and
+    NaN) + manifest + sidecar files."""
     from cubebuild.pixel_area import pixel_area_rows
 
     lat, lon = tier_centers("1deg")
@@ -198,10 +200,10 @@ def _fixture(tmp_path):
     return contract, store, state
 
 
-# ---------------- 剥离计划 ----------------
 
 def test_strip_plan_internal(tmp_path):
-    """internal 层+掩膜+侧车剥离；缺口注记含数据集/原因/读者指引。"""
+    """internal layer + mask + sidecar stripped; gap notes carry the dataset /
+    reason / reader guidance."""
     contract, store, state = _fixture(tmp_path)
     plan = build_strip_plan(contract, _MINI_SIDECARS, state)
     assert plan["strip_layers"] == ["gravity__wgm2012_bouguer"]
@@ -212,14 +214,13 @@ def test_strip_plan_internal(tmp_path):
     assert "bouguer-wgm2012" in gaps
     assert "BGI" in gaps["bouguer-wgm2012"]["reason"]
     assert "论文建议读者" in gaps["bouguer-wgm2012"]["guidance"]
-    # 仅侧车 internal 的数据集（无 internal 层）同样入缺口注记（禁止无名缺席）
     assert gaps["gem-active-faults"]["layers"] == []
     assert gaps["gem-active-faults"]["sidecars"] == ["gem_active_faults"]
 
 
 def test_strip_plan_t1_branches(tmp_path):
-    """分支一：confirmed → 维持；分支二：rejected / silent_expired → 退出
-    + catalog 动作清单。"""
+    """Branch one: confirmed → keep; branch two: rejected / silent_expired →
+    exit + catalog action list."""
     contract, store, _ = _fixture(tmp_path)
     state = load_t1_state(_t1_state(tmp_path, """
 silent_deadline: "待定"
@@ -229,14 +230,11 @@ datasets:
   semucb-wm1: {catalog_id: 5, status: silent_expired, note: 静默}
 """))
     plan = build_strip_plan(contract, _MINI_SIDECARS, state)
-    # confirmed 维持
     assert "stress_kinematics__pb2002_plate_id" not in plan["strip_layers"]
     assert "pb2002_plates" in plan["kept_sidecar_ids"]
-    # rejected / silent_expired 退出（层+掩膜）
     for lid in ("sediment__gst1_thickness", "seismology__semucb_vs"):
         assert lid in plan["strip_layers"]
         assert f"{lid}__validity" in plan["strip_masks"]
-    # catalog 动作清单（人工执行，不自动落盘）
     actions = {a["dataset_dir"]: a for a in plan["catalog_actions"]}
     assert set(actions) == {"gst1", "semucb-wm1"}
     assert actions["gst1"]["catalog_id"] == 13
@@ -247,7 +245,8 @@ datasets:
 
 
 def test_strip_plan_exit_layers_override(tmp_path):
-    """exit_layers/exit_sidecars 部分退出：未退出项保留并记 needs_hitl。"""
+    """exit_layers/exit_sidecars partial exit: non-exited items are kept and
+    marked needs_hitl."""
     contract, store, _ = _fixture(tmp_path)
     state = load_t1_state(_t1_state(tmp_path, """
 silent_deadline: "待定"
@@ -265,7 +264,8 @@ datasets:
 
 
 def test_strip_plan_mapping_coverage(tmp_path):
-    """契约层缺数据集映射 → 显式失败（防新层静默绕过门禁）。"""
+    """A contract layer missing a dataset mapping → explicit failure (prevents a
+    new layer from silently bypassing the gate)."""
     p = _mapping(tmp_path, layers="""
   - id: unknown__layer
     source: x
@@ -284,7 +284,8 @@ def test_strip_plan_mapping_coverage(tmp_path):
 
 
 def test_load_t1_state_validates(tmp_path):
-    """非法状态值 / 缺 catalog_id / 未知数据集 / 空文件 → 显式失败。"""
+    """Invalid status value / missing catalog_id / unknown dataset / empty file
+    → explicit failure."""
     with pytest.raises(ValueError, match="非法 status"):
         load_t1_state(_t1_state(tmp_path, "datasets:\n  gst1: {catalog_id: 13, status: bogus}"))
     with pytest.raises(ValueError, match="catalog_id"):
@@ -293,14 +294,15 @@ def test_load_t1_state_validates(tmp_path):
         load_t1_state(_t1_state(
             tmp_path, "datasets:\n  no-such-dataset: {catalog_id: 1, status: pending}"))
     empty = tmp_path / "empty.yaml"
-    empty.write_text("", encoding="utf-8")     # 空文件（safe_load → None）不崩
+    empty.write_text("", encoding="utf-8")
     state = load_t1_state(empty)
     assert state["datasets"] == {}
 
 
 def test_export_public_path_overlap_guard(tmp_path):
-    """输出路径与源重叠（out == store / out 在 store 内）→ 前置拦截，
-    覆盖式写入不会删源（不可恢复事故防线）。"""
+    """Output path overlaps the source (out == store / out inside store) → caught
+    up front, so overwrite-style writing never deletes the source (guard against
+    an unrecoverable incident)."""
     contract, store, state = _fixture(tmp_path)
     with pytest.raises(ValueError, match="重叠"):
         export_public(
@@ -316,18 +318,18 @@ def test_export_public_path_overlap_guard(tmp_path):
             t1_state_path=_t1_state(tmp_path, _T1_ALL_PENDING),
             reports_dir=tmp_path / "reports", dry_run=True,
         )
-    assert store.exists()             # 源未被触碰
+    assert store.exists()
 
 
-# ---------------- 公开 store / manifest / 侧车 ----------------
 
 def _nan_aware_equal(a, b) -> bool:
     return bool(np.array_equal(a, b, equal_nan=True))
 
 
 def test_write_public_store_fidelity(tmp_path):
-    """公开 store：internal 层+掩膜消失、3D 组剥空即删、公开层数值 NaN 感知
-    逐位一致、根 attrs 标注公开版。"""
+    """Public store: internal layers + masks disappear, an emptied 3D group is
+    deleted, public-layer values are NaN-aware bitwise identical, and root attrs
+    mark the public edition."""
     contract, store, state = _fixture(tmp_path)
     plan = build_strip_plan(contract, _MINI_SIDECARS, state)
     strip = set(plan["strip_layers"]) | set(plan["strip_masks"])
@@ -336,7 +338,7 @@ def test_write_public_store_fidelity(tmp_path):
             xr.open_datatree(out, engine="zarr", chunks={}) as pub:
         assert "gravity__wgm2012_bouguer" not in pub["/1deg"].ds.data_vars
         assert "gravity__wgm2012_bouguer__validity" not in pub["/1deg"].ds.data_vars
-        assert "semucb" in pub["/1deg"].children          # 公开 3D 组保留
+        assert "semucb" in pub["/1deg"].children
         for name in ("sediment__gst1_thickness", "derived__pixel_area",
                      "stress_kinematics__pb2002_plate_id"):
             assert _nan_aware_equal(
@@ -348,7 +350,6 @@ def test_write_public_store_fidelity(tmp_path):
         )
         assert pub.attrs["edition"] == "public"
         assert "public_export" in pub.attrs
-    # 剥空组删除（semucb 全剥离时）
     plan2 = build_strip_plan(contract, _MINI_SIDECARS, load_t1_state(_t1_state(
         tmp_path, "datasets:\n  semucb-wm1: {catalog_id: 5, status: rejected, note: x}")))
     strip2 = set(plan2["strip_layers"]) | set(plan2["strip_masks"])
@@ -358,7 +359,8 @@ def test_write_public_store_fidelity(tmp_path):
 
 
 def test_public_manifest_gaps(tmp_path):
-    """公开 manifest：层/侧车同步剥离 + public_export 缺口节 + 待确认数据集注记。"""
+    """Public manifest: layers / sidecars stripped in sync + public_export gap
+    section + notes for datasets pending confirmation."""
     contract, store, state = _fixture(tmp_path)
     manifest = read_manifest(store)
     plan = build_strip_plan(contract, manifest["sidecars"], state)
@@ -370,12 +372,13 @@ def test_public_manifest_gaps(tmp_path):
     assert {g["dataset"] for g in pe["gaps"]} == {
         "bouguer-wgm2012", "gem-active-faults",
     }
-    assert pe["t1_pending"]            # gst1/semucb/pb2002 pending 注记
+    assert pe["t1_pending"]
     assert "待定" in pe["t1_note"]
 
 
 def test_copy_public_sidecars(tmp_path):
-    """公开侧车复制：字节级完整、internal 侧车不出现在公开目录。"""
+    """Public sidecar copying: byte-level complete, internal sidecars absent from
+    the public directory."""
     contract, store, state = _fixture(tmp_path)
     kept = [s for s in _MINI_SIDECARS if s["id"] == "pb2002_plates"]
     out_dir = tmp_path / "sidecars-public"
@@ -386,10 +389,10 @@ def test_copy_public_sidecars(tmp_path):
     assert tree_stats(out_dir / "pb2002") == {"n_files": 1, "n_bytes": 600}
 
 
-# ---------------- 编排（含独立结构验证与 dry-run） ----------------
 
 def test_export_public_validation_pass(tmp_path):
-    """公开版候选独立通过结构验证（剥离后契约子集 × 公开 store × 公开 manifest）。"""
+    """The public candidate independently passes structural validation
+    (post-strip contract subset × public store × public manifest)."""
     contract, store, state = _fixture(tmp_path)
     report = export_public(
         store=store, contract=contract, sidecars_dir=tmp_path / "sidecars",
@@ -399,21 +402,19 @@ def test_export_public_validation_pass(tmp_path):
     )
     assert report["result"] == "PASS", report["validation"]
     assert report["validation"]["total_checks"] > 0
-    # 公开 store 的 manifest 即剥离版（验证三方一致的 manifest 来源）
     pub_manifest = read_manifest(tmp_path / "pub.zarr")
     assert len(pub_manifest["layers"]) == 4
-    # 报告落盘
     rep = json.loads((tmp_path / "reports" / "public-export-report.json")
                      .read_text(encoding="utf-8"))
     assert rep["plan"]["n_layers_public"] == 4
-    # 体积核实字段在位
     for part in ("full", "public"):
         for prod in ("store", "sidecars"):
             assert rep["sizes"][part][prod]["n_bytes"] > 0
 
 
 def test_export_public_dry_run_writes_nothing(tmp_path):
-    """dry-run：只出计划/决策/估算，不写任何产物。"""
+    """dry-run: emits only the plan / decisions / estimates, writes no
+    artifact."""
     contract, store, state = _fixture(tmp_path)
     out = tmp_path / "pub.zarr"
     out_sc = tmp_path / "sidecars-public"
@@ -426,14 +427,14 @@ def test_export_public_dry_run_writes_nothing(tmp_path):
     assert report["result"] == "DRY-RUN"
     assert not out.exists() and not out_sc.exists()
     assert not (tmp_path / "reports").exists()
-    # 估算 = 完整 store 字节 − 剥离数组磁盘量
     assert report["sizes"]["public"]["store"]["estimated"] is True
     assert (report["sizes"]["public"]["store"]["n_bytes"]
             < report["sizes"]["full"]["store"]["n_bytes"])
 
 
 def test_packaging_recommendation(tmp_path):
-    """打包建议：超文件数门槛 → 必须整包；超字节门槛 → 分卷建议。"""
+    """Packaging advice: exceeding the file-count threshold → single package
+    required; exceeding the byte threshold → split-volume advice."""
     sizes = {
         "full": {"store": {"n_files": 10, "n_bytes": 10},
                  "sidecars": {"n_files": 1, "n_bytes": 1}},
@@ -449,8 +450,10 @@ def test_packaging_recommendation(tmp_path):
 
 
 def test_array_dir_stats_cross_tier_accumulation(tmp_path):
-    """同名数组跨档位累加（回归：字典覆盖使多档层只剩一档的量）+ chunk
-    子树全量计入（回归：直读直接子文件只见 zarr.json）。"""
+    """Same-named arrays accumulated across tiers (regression: a dict overwrite
+    left a multi-tier layer with only one tier's volume) + the chunk subtree
+    fully counted (regression: reading direct children shows only
+    zarr.json)."""
     store = tmp_path / "s.zarr"
     for tier, size in (("1deg", 100), ("30sec", 400)):
         d = store / tier / "some__layer" / "c" / "0"
@@ -458,22 +461,18 @@ def test_array_dir_stats_cross_tier_accumulation(tmp_path):
         (d / "chunk").write_bytes(b"x" * size)
         (store / tier / "some__layer" / "zarr.json").write_text("{}")
     arr = _array_dir_stats(store)
-    assert arr["some__layer"]["n_bytes"] == 500 + 2 * 2   # 两档 chunk + 两份 zarr.json
+    assert arr["some__layer"]["n_bytes"] == 500 + 2 * 2
     assert arr["some__layer"]["n_files"] == 4
 
 
-# ---------------- 契约真实映射完备性（防漂移） ----------------
 
 def test_real_contract_mapping_complete():
-    """真实契约（layer-mapping-v0.yaml）全部层 + manifest 侧车有数据集映射：
-    公开门禁无静默绕行。"""
+    """Real contract (layer-mapping-v0.yaml): every layer + manifest sidecar has
+    a dataset mapping, so the public gate has no silent bypass."""
     mapping = DEFAULT_CONTRACT_PATH
     contract = load_contract(mapping)
     unmapped = [e.id for e in contract.layers if e.id not in LAYER_DATASET]
     assert not unmapped
-    # internal 数据集全集 = 既有 4（WGM2012/GSRM/
-    # GEM 断层/Global Basins）+ 六项待确认再分发许可的数据集
-    # （GLAD-M35/SEMUCB/PB2002/GST-1/heatflow 部分退出/glim 仅 LiMW 侧车）
     internal_ds = {LAYER_DATASET[e.id] for e in contract.layers
                    if e.visibility == "internal"}
     assert internal_ds <= {
@@ -481,6 +480,5 @@ def test_real_contract_mapping_complete():
         "glad-m35", "semucb-wm1", "pb2002-plate-boundaries", "gst1",
         "heatflow", "glim-lithology",
     }
-    # 门禁停用：t1_state_path=None 空置分支可用
     state = load_t1_state(None)
     assert state["datasets"] == {}

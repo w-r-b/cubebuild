@@ -1,34 +1,45 @@
-"""物理交叉核对：四组独立产品的数值交叉——只报告不拦截。
+"""Physical cross-check: numerical cross-comparison of four independent products — report only, never block.
 
-四组（层映射表 validation_reference）：
-1. 验证三元组：gemma_basement_depth + gst1_thickness ≈ bedrock_elevation
-   （三层均取 store 1° 档；存储符号约定下恒等式 = 高程[m] ≈ 基底[km]×1000
-   + 沉积厚[m]，GEMMA 负值向下）
-2. GEMMA moho × CRUST1.0 moho（depthtomoho.xyz 1° 验证参考；CRUST1.0
-   由此整体退出立方，仅本地核对）
-3. GST1 × GlobSed v3 海洋段（GlobSed-v3.nc 5′ 验证参考，海洋段交叉）
-4. EMAG2 海平面版 × 上延版谱一致性（UpCont；Meyer 2017 原文实证：
-   "All continental grids … were upward continued to 4 km"，即上延版
-   = 4 km 高度版——谱比拟合 Δz 与该名义值对照）
+Four groups (layer-mapping validation_reference):
+1. Validation triple: gemma_basement_depth + gst1_thickness ≈ bedrock_elevation
+   (all three layers taken at the store's 1deg tier; under the storage sign
+   convention the identity = elevation[m] ≈ basement[km]×1000 + sediment
+   thickness[m], GEMMA negative downward)
+2. GEMMA moho × CRUST1.0 moho (depthtomoho.xyz 1deg validation reference;
+   CRUST1.0 therefore leaves the cube entirely, local check only)
+3. GST1 × GlobSed v3 marine segment (GlobSed-v3.nc 5′ validation reference,
+   marine-segment cross-check)
+4. EMAG2 sea-level version × upward-continued version spectral consistency
+   (UpCont; corroborated by Meyer 2017: "All continental grids … were upward
+   continued to 4 km", i.e. the upward-continued version = 4 km height
+   version — the spectral-ratio fit Δz is compared against this nominal value)
 
-验证参考纪律（CONTEXT.md 术语）：参考数据仅本地核对，报告只引用统计量，
-不发布其数据、不进立方；全部检查 status="report"，永不拦截。
+Validation-reference discipline (CONTEXT.md terminology): reference data is
+checked locally only; the report cites statistics only and neither publishes
+its data nor ingests it into the cube; all checks have status="report" and
+never block.
 
-源几何（磁盘实证）：
-- CRUST1.0 depthtomoho.xyz：64800 行 = 180×360，首行 (lon, lat) =
-  (-179.5, 89.5) 北起、经度内循环步 1°；值 km、海平面基准负值向下
-  （地标实证：青藏 85.5E/32.5N = −65.85、安第斯 −50.06、太平洋
-  深海平原 −11.13——与 GEMMA moho 同符号约定）；中心恰为立方 1° 档
-  中心（±.5 集），翻转后免重采样直比。
-- GlobSed-v3.nc：lon/lat 4321×2161 gridline 节点（-180..180/-90..90
-  步 1/12°），纬度南起；z 沉积厚度 m，NaN 33%（陆地）；±180 列逐位
-  相同（周期重复，弃 +180 列）；两极行行内常值（北极 3101.95 /
-  南极 1873.60 m，极点单点）——节点→Voronoi 胞解释。
-- EMAG2 UpCont：与海平面版同形 5399×10800、同包络（0..360 框架 +
-  极冠缺口）、同 nodata——共用 gravmag.load_emag2_tif 归一化与几何断言。
+Source geometry (disk-verified):
+- CRUST1.0 depthtomoho.xyz: 64800 rows = 180×360, first row (lon, lat) =
+  (-179.5, 89.5) north-first, longitude inner loop step 1°; values in km,
+  sea-level datum negative downward (landmark check: Tibet 85.5E/32.5N =
+  −65.85, Andes −50.06, Pacific abyssal plain −11.13 — same sign convention
+  as GEMMA moho); its cell centers align exactly with the cube's 1deg tier
+  centers (the ±.5 set), so after flipping it can be compared directly
+  without resampling.
+- GlobSed-v3.nc: lon/lat 4321×2161 gridline nodes (-180..180/-90..90 step
+  1/12°), latitude south-first; z sediment thickness in m, NaN 33% (land);
+  ±180 columns are bit-identical (periodic duplication, drop the +180
+  column); the two polar rows are constant along the row (North Pole
+  3101.95 / South Pole 1873.60 m, single point at the pole) — node →
+  Voronoi cell interpretation.
+- EMAG2 UpCont: same shape 5399×10800 and same envelope (0..360 frame +
+  polar-cap gap) as the sea-level version, same nodata — shares
+  gravmag.load_emag2_tif normalization and geometry assertions.
 
-内存纪律（WSL ≤40GB 硬约束）：EMAG2 两版全量 float32 ~233MB ×2 +
-  512² 复谱窗逐窗计算，峰值 <2GB；其余组均为 1° 小网格。
+Memory discipline (WSL ≤40GB hard constraint): the two EMAG2 versions are
+full float32 ~233MB ×2 + 512² repeated spectral windows computed window by
+window, peak <2GB; the remaining groups are all small 1deg grids.
 """
 
 import json
@@ -50,29 +61,27 @@ GLOBSED_SRC_DIR = REPO_ROOT / "original data/sediment/globsed"
 GLOBSED_FILE = "GlobSed-v3.nc"
 EMAG2_UPCONT_FILE = "EMAG2_V3_20170530_UpCont.tif"
 
-# 读取期几何断言常量（磁盘实证的契约化；测试可 monkeypatch 缩格）
 CRUST1_EXPECTED = {"n_rows": 64800, "first": (-179.5, 89.5), "value_range": (-80.0, -2.0)}
 GLOBSED_EXPECTED = {"shape": (2161, 4321), "spacing": Fraction(1, 12)}
 
-EMAG2_NOMINAL_UPCONT_KM = 4.0    # Meyer 2017 原文（refs PDF 自证）
-EMAG2_WINDOW = 512                # 谱窗边长（px，~8.5°×8.5° @2′；磁盘实证
-                                   # 2048/1024 窗双版全有效数为 0，512 窗 41 个）
-EMAG2_N_WINDOWS = 12              # 汇入窗数（确定性扫描取前 N 个全有效窗）
-EMAG2_KMIN_RAD_KM = 0.02          # 拟合下界（避开均值扣除/锥窗主导的超低波数）
-EMAG2_KMAX_RAD_KM = 0.60          # 拟合上界（避开 Nyquist 邻域的数值噪声）
+EMAG2_NOMINAL_UPCONT_KM = 4.0
+EMAG2_WINDOW = 512
+EMAG2_N_WINDOWS = 12
+EMAG2_KMIN_RAD_KM = 0.02
+EMAG2_KMAX_RAD_KM = 0.60
 
-# 代表波长（km）处的谱比报告点
 EMAG2_REPORT_WAVELENGTHS_KM = (100.0, 50.0, 25.0, 12.5)
 
 
-# ---------------- 验证参考读取 ----------------
 
 def load_crust1_moho(src_dir: str | Path = CRUST1_SRC_DIR) -> np.ndarray:
-    """读 CRUST1.0 depthtomoho.xyz → (180, 360) km 负值向下，南起对齐立方 1° 中心。
+    """Read CRUST1.0 depthtomoho.xyz → (180, 360) km negative downward, south-first aligned to the cube's 1deg centers.
 
-    断言（磁盘实证的契约化）：64800 行；首行 (lon, lat) = (-179.5, 89.5)
-    北起；行内纬度常值、行间步 -1°；行内经度 -179.5..179.5 步 1°；值域
-    ⊂ [-80, -2] km（Moho 深度海平面基准负值向下；源漂移即显式失败）。
+    Assertions (contractualized disk evidence): 64800 rows; first row (lon, lat)
+    = (-179.5, 89.5) north-first; latitude constant within a row and stepping -1°
+    between rows; longitude within a row from -179.5..179.5 step 1°; value range
+    ⊂ [-80, -2] km (Moho depth, sea-level datum negative downward; source drift
+    fails explicitly).
     """
     path = Path(src_dir) / CRUST1_MOHO_FILE
     if not path.is_file():
@@ -111,15 +120,16 @@ def load_crust1_moho(src_dir: str | Path = CRUST1_SRC_DIR) -> np.ndarray:
             f"{CRUST1_MOHO_FILE}: 值域 [{v.min():.2f}, {v.max():.2f}] 超出 "
             f"[{lo}, {hi}] km（负值向下海平面基准假设被破坏）"
         )
-    return v[::-1].astype(np.float32)            # 北起 → 南起（对齐 store 1°）
+    return v[::-1].astype(np.float32)
 
 
 def load_globsed(src_dir: str | Path = GLOBSED_SRC_DIR):
-    """读 GlobSed-v3.nc → RasterSource（gridline 节点 → Voronoi 胞，WGM2012 惯例）。
+    """Read GlobSed-v3.nc → RasterSource (gridline nodes → Voronoi cells, the WGM2012 convention).
 
-    断言（磁盘实证的契约化）：4321×2161 节点（步 1/12°）；纬度南起；
-    ±180 列逐位相同（周期重复，弃 +180 列）；两极行行内常值（极点单点）；
-    z 单位 m（海洋沉积厚度，陆地 NaN）。
+    Assertions (contractualized disk evidence): 4321×2161 nodes (step 1/12°);
+    latitude south-first; ±180 columns bit-identical (periodic duplication, drop
+    the +180 column); the two polar rows constant along the row (single point at
+    the pole); z in m (marine sediment thickness, land NaN).
     """
     import netCDF4
 
@@ -149,7 +159,7 @@ def load_globsed(src_dir: str | Path = GLOBSED_SRC_DIR):
     if np.unique(z[0]).size != 1 or np.unique(z[-1]).size != 1:
         raise ValueError(f"{GLOBSED_FILE}: 极点行行内非常值（极点单点假设被破坏）")
 
-    values = z[:, :-1]                            # 弃 +180 重复列 → 4320
+    values = z[:, :-1]
     valid = np.isfinite(values)
     lat_edges = -90.0 + (np.arange(ny + 1, dtype=np.float64) - 0.5) * float(spacing)
     lat_edges[0], lat_edges[-1] = -90.0, 90.0
@@ -170,12 +180,11 @@ def load_globsed(src_dir: str | Path = GLOBSED_SRC_DIR):
     )
 
 
-# ---------------- 统计工具 ----------------
 
 def _pair_stats(x: np.ndarray, y: np.ndarray, mask: np.ndarray | None = None) -> dict:
-    """两场配对统计（NaN 感知）：diff = y − x，OLS y = slope·x + intercept。
+    """Paired statistics for two fields (NaN-aware): diff = y − x, OLS y = slope·x + intercept.
 
-    x = 立方层/观测，y = 参考/预测（调用方在 name/summary 里说明方向）。
+    x = cube layer/observation, y = reference/prediction (the caller states the direction in name/summary).
     """
     if mask is None:
         mask = np.isfinite(x) & np.isfinite(y)
@@ -215,19 +224,20 @@ def _fmt_pair(s: dict, unit: str) -> str:
     )
 
 
-# ---------------- 组 1：验证三元组 ----------------
 
-TRIPLE_POLAR_LAT = 60.0   # 极区分段界（|lat| ≥ 60°：南极/格陵兰冰盖带）
+TRIPLE_POLAR_LAT = 60.0
 
 
 def crosscheck_triple(tree) -> list[dict]:
-    """gemma_basement_depth + gst1_thickness ≈ bedrock_elevation（store 1° 三层）。
+    """gemma_basement_depth + gst1_thickness ≈ bedrock_elevation (three store layers at 1°).
 
-    存储符号约定下的恒等式：高程[m] ≈ 基底深度[km]×1000 + 沉积厚度[m]
-    （GEMMA 负值向下：基底 −2 km + 沉积 1.5 km → 地表 −0.5 km）。
-    残差 = 高程 −（基底×1000 + 沉积厚），全球/陆/海/极区/非极区五段统计
-    （报告制）+ 已知偏差注记（极区冰下重复计数签名 + 频段错配下限，
-    残差分解实证：全球 RMS ~1.0 km 中约 3/4 方差来自极区）。
+    Identity under the storage sign convention: elevation[m] ≈ basement depth[km]×1000 + sediment thickness[m]
+    (GEMMA negative downward: basement −2 km + sediment 1.5 km → surface −0.5 km).
+    Residual = elevation − (basement×1000 + sediment thickness); statistics over five
+    segments global/land/sea/polar/non-polar (reporting only) + a known-bias note
+    (polar sub-ice double-counting signature + band-mismatch lower bound; residual-
+    decomposition evidence: of the global RMS ~1.0 km, about 3/4 of the variance
+    comes from the polar regions).
     """
     node = tree["/1deg"]
     elev = node["topography__bedrock_elevation"].values
@@ -269,8 +279,6 @@ def crosscheck_triple(tree) -> list[dict]:
             "stats": s,
         })
 
-    # 极区重复计数签名：resid 对 sed 的回归（残差 ≈ −sed ⟹ 斜率趋 −1，
-    # 即 GEMMA 基底已隐含冰下沉积柱、恒等式重复计数）
     sig = {}
     sp, rp = sed[polar].astype(np.float64), (obs - pred)[polar]
     if sp.size > 10 and sp.std() > 0:
@@ -305,14 +313,14 @@ def crosscheck_triple(tree) -> list[dict]:
     return checks
 
 
-# ---------------- 组 2：GEMMA moho × CRUST1.0 ----------------
 
 def crosscheck_gemma_vs_crust1(tree, src_dir: str | Path | None = CRUST1_SRC_DIR) -> list[dict]:
-    """GEMMA moho（GOCE 反演）× CRUST1.0 moho（地震学编图）1° 逐像元交叉。
+    """Pixel-by-pixel 1° cross-check of GEMMA moho (GOCE inversion) × CRUST1.0 moho (seismological compilation).
 
-    两者同为海平面基准负值向下（km）；CRUST1.0 中心恰为立方 1° 中心，
-    翻转后免重采样直比。x=CRUST1.0（参考），y=GEMMA（立方层）。
-    src_dir=None 走缺省路径（integration 的 .get() 约定）。
+    Both use the sea-level datum negative downward (km); CRUST1.0 centers align exactly
+    with the cube's 1° centers, so after flipping they can be compared directly without
+    resampling. x=CRUST1.0 (reference), y=GEMMA (cube layer).
+    src_dir=None takes the default path (the integration .get() convention).
     """
     crust1 = load_crust1_moho(src_dir or CRUST1_SRC_DIR)
     node = tree["/1deg"]
@@ -339,14 +347,14 @@ def crosscheck_gemma_vs_crust1(tree, src_dir: str | Path | None = CRUST1_SRC_DIR
     return checks
 
 
-# ---------------- 组 3：GST1 × GlobSed 海洋段 ----------------
 
 def crosscheck_gst1_vs_globsed(tree, src_dir: str | Path | None = GLOBSED_SRC_DIR) -> list[dict]:
-    """GST1 沉积厚度（立方唯一沉积层）× GlobSed v3 海洋段（5′ 验证参考）。
+    """GST1 sediment thickness (the cube's only sediment layer) × GlobSed v3 marine segment (5′ validation reference).
 
-    GlobSed 经保守核聚合到 1°（WGM2012 类 gridline→Voronoi 解释），海洋段
-    = GlobSed 有效像元（陆地 NaN）。x=GlobSed 聚合（参考），y=GST1（立方层）。
-    src_dir=None 走缺省路径（integration 的 .get() 约定）。
+    GlobSed is aggregated to 1° via the conservative kernel (WGM2012-style
+    gridline→Voronoi interpretation); the marine segment = GlobSed valid pixels
+    (land NaN). x=GlobSed aggregate (reference), y=GST1 (cube layer).
+    src_dir=None takes the default path (the integration .get() convention).
     """
     src = load_globsed(src_dir or GLOBSED_SRC_DIR)
     agg, W = conservative_overlap_mean(
@@ -359,7 +367,7 @@ def crosscheck_gst1_vs_globsed(tree, src_dir: str | Path | None = GLOBSED_SRC_DI
     s = _pair_stats(agg, gst1, marine)
     with np.errstate(invalid="ignore", divide="ignore"):
         ratio = gst1[marine].astype(np.float64) / agg[marine].astype(np.float64)
-    ratio = ratio[np.isfinite(ratio)]          # GlobSed 聚合 0 m 像元不可比
+    ratio = ratio[np.isfinite(ratio)]
     checks = [{
         "name": "组说明（GST1 × GlobSed 海洋段）",
         "status": "report",
@@ -382,14 +390,14 @@ def crosscheck_gst1_vs_globsed(tree, src_dir: str | Path | None = GLOBSED_SRC_DI
     return checks
 
 
-# ---------------- 组 4：EMAG2 海平面版 × 上延版谱一致性 ----------------
 
 def _k_grid(n: int, res_deg: float, lat_c: float) -> np.ndarray:
-    """rfft2 输出各元的物理波数模（rad/km），经度向按窗心纬度 cos 缩放。
+    """Physical wavenumber magnitude (rad/km) of each rfft2 output element, with the longitude direction scaled by cos of the window-center latitude.
 
-    kx = 2π·fx / ((π/180)·R·cosφ)，ky = 2π·fy / ((π/180)·R)
-    （fx/fy cycles/deg；全球经纬网格谱分析的窗心纬度局部平面近似，
-    报告制交叉核对的既定精度口径）。
+    kx = 2π·fx / ((π/180)·R·cosφ), ky = 2π·fy / ((π/180)·R)
+    (fx/fy in cycles/deg; the local-plane approximation at the window-center latitude
+    for spectral analysis on a global lat/lon grid, the established precision convention
+    for the reporting-only cross-check).
     """
     fx = np.fft.fftfreq(n, d=res_deg)
     fy = np.fft.fftfreq(n, d=res_deg)
@@ -401,9 +409,9 @@ def _k_grid(n: int, res_deg: float, lat_c: float) -> np.ndarray:
 
 def _radial_power(win: np.ndarray, res_deg: float, lat_c: float,
                   n_bins: int = 48) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """窗场 → 径向平均功率谱：(k_bin 中心, 平均功率, 每 bin 谱元数)。
+    """Window field → radially averaged power spectrum: (k_bin centers, mean power, spectral-element count per bin).
 
-    均值扣除 + 可分 Hann 锥窗（周期图法）；k 分箱线性于 [0, k_max]。
+    Mean removal + separable Hann taper (periodogram method); k bins linear over [0, k_max].
     """
     n = win.shape[0]
     taper = np.hanning(n)[:, None] * np.hanning(n)[None, :]
@@ -423,12 +431,13 @@ def _radial_power(win: np.ndarray, res_deg: float, lat_c: float,
 def _continuation_fit(k: np.ndarray, ratio: np.ndarray, count: np.ndarray,
                       kmin: float = EMAG2_KMIN_RAD_KM,
                       kmax: float = EMAG2_KMAX_RAD_KM) -> dict:
-    """谱比 log(P_up/P_sea) = −2Δz·k 最小二乘拟合 → {delta_z_km, r2, n_bins,
-    frac_ratio_gt1}。
+    """Least-squares fit of the spectral ratio log(P_up/P_sea) = −2Δz·k → {delta_z_km, r2,
+    n_bins, frac_ratio_gt1}.
 
-    frac_ratio_gt1：拟合带内谱比 >1 的 bin 占比——纯上延恒有 P_up < P_sea
-    （ratio < 1），显著 >0 说明该窗两版差异非纯上延（数据内容差异），
-    供调用方做窗一致性甄别。
+    frac_ratio_gt1: fraction of bins within the fit band with spectral ratio >1 — pure
+    upward continuation always has P_up < P_sea (ratio < 1), so a value significantly >0
+    means the window's two versions differ beyond pure continuation (a data-content
+    difference), letting the caller screen window consistency.
     """
     sel = (
         np.isfinite(ratio) & (ratio > 0) & (count > 0)
@@ -457,14 +466,15 @@ def _continuation_fit(k: np.ndarray, ratio: np.ndarray, count: np.ndarray,
 def _emag2_windows(valid_sea: np.ndarray, valid_up: np.ndarray,
                    window: int = EMAG2_WINDOW, n_windows: int = EMAG2_N_WINDOWS,
                    stride: int | None = None):
-    """确定性选窗（两版均无缺测），返回 n_windows 个 (i0, j0)。
+    """Deterministic window selection (both versions free of missing data), returning n_windows (i0, j0) pairs.
 
-    地理偏性防护（code-review 实证：朴素行主序「取前 N」会 12 窗全落
-    南半球）：非重叠步进（stride=window）扫描全部候选 → 按纬度排序后
-    等距抽取 N 个，保证纬度覆盖均布（缺测结构允许范围内）。
+    Geographic-bias guard (code review evidence: the naive row-major "take first N" put all
+    12 windows in the Southern Hemisphere): scan all candidates with non-overlapping strides
+    (stride=window) → sort by latitude then sample N at equal intervals, ensuring a
+    uniformly distributed latitude coverage (within the limits allowed by the missing-data structure).
     """
     nlat, nlon = valid_sea.shape
-    stride = stride or window                  # 非重叠（独立窗，不低估 std）
+    stride = stride or window
     both = valid_sea & valid_up
     cands = []
     for i0 in range(0, nlat - window + 1, stride):
@@ -473,7 +483,6 @@ def _emag2_windows(valid_sea: np.ndarray, valid_up: np.ndarray,
                 cands.append((i0, j0))
     if len(cands) <= n_windows:
         return cands
-    # 纬度排序（升序）→ 等距抽 N：确定性 + 南北均布
     cands.sort(key=lambda t: (t[0], t[1]))
     idx = np.linspace(0, len(cands) - 1, n_windows).round().astype(int)
     return [cands[int(i)] for i in sorted(set(idx.tolist()))]
@@ -482,11 +491,12 @@ def _emag2_windows(valid_sea: np.ndarray, valid_up: np.ndarray,
 def crosscheck_emag2_spectral(src_dir: str | Path | None = EMAG_SRC_DIR,
                                window: int = EMAG2_WINDOW,
                                n_windows: int = EMAG2_N_WINDOWS) -> list[dict]:
-    """EMAG2 海平面版 × 上延版谱一致性：谱比 → 拟合上延高度 Δz（报告制）。
+    """EMAG2 sea-level version × upward-continued version spectral consistency: spectral ratio → fitted upward-continuation height Δz (reporting only).
 
-    上延算子谱响应 P_up/P_sea = exp(−2Δz·k)；对每窗拟合 Δz，与 Meyer 2017
-    原文实证的名义 4 km 对照；另报代表波长处实测谱比与 exp(−2Δz·k) 期望。
-    src_dir=None 走缺省路径（integration 的 .get() 约定）。
+    The upward-continuation operator's spectral response P_up/P_sea = exp(−2Δz·k); fit Δz
+    per window and compare against the nominal 4 km corroborated by Meyer 2017; also report
+    the measured spectral ratio at representative wavelengths and the exp(−2Δz·k) expectation.
+    src_dir=None takes the default path (the integration .get() convention).
     """
     src_dir = src_dir or EMAG_SRC_DIR
     sea = load_emag2_tif(EMAG_FILE, src_dir)
@@ -516,9 +526,6 @@ def crosscheck_emag2_spectral(src_dir: str | Path | None = EMAG_SRC_DIR,
         with np.errstate(invalid="ignore", divide="ignore"):
             ratio = p_up / p_sea
         fit = _continuation_fit(k, ratio, cnt)
-        # 窗一致性甄别：纯上延恒有 ratio < 1（P_up < P_sea）且 Δz > 0、
-        # 谱比对 k 的负指数关系成立（r²）。偏离窗（两版数据内容差异超
-        # 纯上延，如实测夏威夷窗 ratio>1）不进均值。
         fit["consistent"] = bool(
             np.isfinite(fit["delta_z_km"]) and fit["delta_z_km"] > 0
             and fit["r2"] >= 0.9 and fit["frac_ratio_gt1"] <= 0.1
@@ -534,7 +541,6 @@ def crosscheck_emag2_spectral(src_dir: str | Path | None = EMAG_SRC_DIR,
     dz_mean = float(dz.mean()) if dz.size else float("nan")
     dz_std = float(dz.std()) if dz.size else float("nan")
 
-    # 代表波长处谱比（一致窗的谱比平均后内插）
     rep = []
     dz_for_expected = dz_mean if np.isfinite(dz_mean) else EMAG2_NOMINAL_UPCONT_KM
     good_idx = [i for i, f in enumerate(fits) if f["consistent"]]
@@ -603,7 +609,6 @@ def crosscheck_emag2_spectral(src_dir: str | Path | None = EMAG_SRC_DIR,
     }]
 
 
-# ---------------- 报告组装 ----------------
 
 CROSSCHECK_GROUPS = (
     ("验证三元组", "crosscheck_triple", "tree"),
@@ -615,13 +620,14 @@ CROSSCHECK_GROUPS = (
 
 def assemble_crosscheck_groups(store_dir, src_dirs: dict | None = None,
                                 catch_errors: bool = True) -> list[dict]:
-    """四组交叉的统一装配（build_crosscheck_report 与 integration 共用，
-    消除双实现漂移）。
+    """Unified assembly of the four cross-check groups (shared by build_crosscheck_report
+    and integration, eliminating dual-implementation drift).
 
-    src_dirs：{"crust1": …, "globsed": …, "emag2": …}，缺项走各源缺省路径。
-    catch_errors=True 时组异常落为 FAIL 检查项（无报告可出 = 交付缺失，
-    「只报告不拦截」指数值结果，不含执行失败）；False 时异常上抛
-    （独立调用方自行处置）。
+    src_dirs: {"crust1": …, "globsed": …, "emag2": …}; a missing entry takes each source's
+    default path. With catch_errors=True a group exception becomes a FAIL check item (no
+    report producible = a delivery defect; "report only, never block" refers to the numeric
+    results, not to execution failures); with False the exception propagates (independent
+    callers handle it themselves).
     """
     src_dirs = src_dirs or {}
     groups: list[dict] = []
@@ -638,7 +644,7 @@ def assemble_crosscheck_groups(store_dir, src_dirs: dict | None = None,
         for name, fn_name, _kind in CROSSCHECK_GROUPS:
             try:
                 groups.append({"group": name, "checks": fns[fn_name]()})
-            except Exception as e:  # noqa: BLE001 —— 组失败须显式报告
+            except Exception as e:
                 if not catch_errors:
                     raise
                 groups.append({
@@ -654,7 +660,7 @@ def assemble_crosscheck_groups(store_dir, src_dirs: dict | None = None,
 
 def build_crosscheck_report(store_dir, crust1_src_dir=None, globsed_src_dir=None,
                             emag2_src_dir=None) -> dict:
-    """四组物理交叉 → 报告 dict（数值结果全部 status=report，只报告不拦截）。"""
+    """Four physical cross-check groups → report dict (all numeric results have status=report, report only, never block)."""
     src_dirs = {
         k: v for k, v in (
             ("crust1", crust1_src_dir), ("globsed", globsed_src_dir),

@@ -1,8 +1,8 @@
-"""层构建器注册表。
+"""Layer-builder registry.
 
-每个已实现构建器的层在此登记；后续新增构建器时在此挂载。
-未登记的层由构建入口跳过并记入 pending（骨架阶段预期行为）；
-已登记但源数据未集齐的层（如 SourceNotReady）同样跳过并提示原因。
+Every layer with an implemented builder is registered here; mount new builders here when added.
+Unregistered layers are skipped by the build entry point and recorded as pending (expected behavior during the skeleton stage);
+registered layers whose source data is not yet complete (e.g. SourceNotReady) are likewise skipped with the reason reported.
 """
 
 from .contract import LayerEntry
@@ -42,11 +42,6 @@ from .slab2 import build_slab2_data_layer, build_slab2_overlap_mask
 from .thermal import build_hfgrid14_heatflow, build_heatflow_density
 from .vector import build_hasterok_province_class
 
-# 层 id → 构建器 (entry, tier) -> xr.DataArray
-# 3D 地震层返回 [depth, lat, lon] 数组，cli 按 SEISMIC_3D_GROUP_OF
-# 路由入档位子节点（深度坐标 289/74 互不相同，不能共存于档位节点）。
-# 4D 古高程层返回 [time, lat, lon] 数组，cli 按 PALEO_4D_GROUP_OF
-# 路由入 /{tier}/paleodem（与档位节点 2D 层形状不同，同节点严格配准约束）。
 LAYER_BUILDERS = {
     "derived__pixel_area": build_pixel_area,
     "derived__landsea_mask": build_landsea_mask,

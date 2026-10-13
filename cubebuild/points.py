@@ -1,30 +1,40 @@
-"""点密度通道：点 → 像元计数层（sum 核）。
+"""Point-density channel: points → cell count layers (sum kernel).
 
-立方不插值点数据：原始点全部留矢量侧车，立方只收密度/计数
-层——本模块交付两个 uint32 密度层（免掩膜，0 即无观测）：
-- stress_kinematics__wsm_density（public）：WSM 2025 应力观测点
-- stress_kinematics__gsrm_gps_density（internal）：GSRM GPS 站点观测
+The cube does not interpolate point data: all raw points remain in vector
+sidecars; the cube only ingests density/count layers—this module delivers
+two uint32 density layers (mask-free, 0 means no observation):
+- stress_kinematics__wsm_density (public): WSM 2025 stress observation points
+- stress_kinematics__gsrm_gps_density (internal): GSRM GPS station observations
 
-WSM 源契约（磁盘实证）：
-- WSM_Database_2025.csv：100842 数据行 × 40 列（表头具名；LAT 在前
-  LON 在后；LON ±180 制）。xlsx 并存同内容，立方消费 csv。
-- 170 行 LAT/LON 空（TYPE=DIF 77/BO 64/HF 29，QUALITY 全 Xmi）——
-  无坐标不可落格：密度层计数基准 = 可定位 100672 行（count_semantics
-  注记），侧车原样保留全 100842 行。
-- AZI=999 为占位值（11095 行）——与密度层无关，侧车消费方须知。
+WSM source contract (verified on disk):
+- WSM_Database_2025.csv: 100842 data rows × 40 columns (named header; LAT
+  before LON; LON in ±180 convention). An xlsx with the same content exists
+  alongside; the cube consumes the csv.
+- 170 rows with empty LAT/LON (TYPE=DIF 77/BO 64/HF 29, QUALITY all Xmi)—
+  no coordinates means no cell assignment: the density-layer count basis =
+  100672 locatable rows (count_semantics note); the sidecar retains all
+  100842 rows as-is.
+- AZI=999 is a placeholder value (11095 rows)—unrelated to the density layer;
+  sidecar consumers should be aware.
 
-GSRM 源契约（磁盘实证）：
-- GPS_ITRF08.gmt：psvelo 9 列无表头 lon lat ve vn se sn corr site
-  study；22511 行全可定位、无空值。列 1 经度 0..360 制（实测
-  0.001..359.994）——落格前卷绕到 [-180, 180)。
-- README 的 psvelo「0,0,0」不确定度描述只符合 vel-at-GPS_*.gmt 模型
-  文件；观测文件第 5–7 列为真实 se/sn/corr（按实际 9 列解析）。
-- 三数：22511 行 / 18440 唯一坐标 / 16681 唯一站码（psvelo 按研究
-  一行一站，站码跨研究复用）。计数基准定死 = 观测记录行 22511（与
-  WSM 记录行语义一致；侧车逐行落格即还原密度层）——三数与基准均入
-  manifest count_semantics。
-- 53 个 GPS_*.gmt 参考系文件同站重复（各 22511 行、同站集，已实证
-  仅速度值随参考系旋转不同），禁跨系计数——密度层只取 ITRF08 单系。
+GSRM source contract (verified on disk):
+- GPS_ITRF08.gmt: psvelo 9 columns without header lon lat ve vn se sn corr
+  site study; 22511 rows all locatable, no empty values. Column 1 longitude
+  in 0..360 convention (measured 0.001..359.994)—wrap to [-180, 180) before
+  cell assignment.
+- The psvelo "0,0,0" uncertainty description in the README matches only the
+  vel-at-GPS_*.gmt model files; columns 5–7 of the observation files hold the
+  real se/sn/corr (parsed as the actual 9 columns).
+- Three counts: 22511 rows / 18440 unique coordinates / 16681 unique station
+  codes (psvelo is one row per station per study; station codes are reused
+  across studies). The count basis is fixed = observation record rows 22511
+  (semantically consistent with WSM record rows; assigning each sidecar row
+  to a cell reproduces the density layer)—the three counts and the basis all
+  go into manifest count_semantics.
+- The 53 GPS_*.gmt reference-frame files duplicate the same stations (each
+  22511 rows, same station set; verified that only velocity values differ
+  across frame rotations); counting across frames is forbidden—the density
+  layer takes the ITRF08 frame only.
 """
 
 from pathlib import Path
@@ -47,13 +57,12 @@ GSRM_POLES_NAMES = ("poles.APM", "poles.IGS08", "poles.NNR", "poles.PA")
 
 WSM_LAYER_ID = "stress_kinematics__wsm_density"
 GSRM_LAYER_ID = "stress_kinematics__gsrm_gps_density"
-GSRM_DOI = "10.1002/2014GC005407"      # Kreemer et al. 2014（DOI 自证）
+GSRM_DOI = "10.1002/2014GC005407"
 HOME_TIER = "3min"
 
-# 源契约常量（磁盘实证的契约化；源变更即读取期显式失败）
 WSM_EXPECTED_ROWS = 100842
 WSM_EXPECTED_COLS = 40
-WSM_EXPECTED_LOCATABLE = 100672        # 100842 − 170 空坐标行
+WSM_EXPECTED_LOCATABLE = 100672
 GSRM_EXPECTED_ROWS = 22511
 GSRM_UNIQUE_COORDS = 18440
 GSRM_UNIQUE_SITES = 16681
@@ -72,16 +81,18 @@ GSRM_COUNT_SEMANTICS = (
 )
 
 
-# ---------------- 源读取 ----------------
 
 def load_wsm_points(src_dir: str | Path = WSM_SRC_DIR):
-    """读 WSM_Database_2025.csv → DataFrame（全 40 列原样）。
+    """Read WSM_Database_2025.csv → DataFrame (all 40 columns as-is).
 
-    契约：100842 行 × 40 列、LAT/LON 列存在（空坐标行的处理见模块
-    docstring 与 count_semantics——读取器不在此过滤，落格端统一 dropna）。
-    NA 语义两全：keep_default_na=False 保留字面 "NA" 等字符串（pandas
-    默认吞成 NaN——GSRM poles 北美板块码 NA 即踩此坑），空字段再显式
-    replace("", NaN)（空 = 缺测的语义不丢）。
+    Contract: 100842 rows × 40 columns, LAT/LON columns present (handling of
+    empty-coordinate rows is described in the module docstring and
+    count_semantics—the reader does not filter here; the grid-assignment end
+    applies dropna uniformly). NA semantics kept on both sides:
+    keep_default_na=False preserves literal strings such as "NA" (pandas would
+    otherwise swallow them into NaN—the GSRM poles North America plate code NA
+    hits this pitfall), then empty fields are explicitly replace("", NaN) (the
+    empty = missing semantics is not lost).
     """
     import pandas as pd
 
@@ -102,13 +113,16 @@ def load_wsm_points(src_dir: str | Path = WSM_SRC_DIR):
 
 
 def load_gsrm_gps(src_dir: str | Path = GSRM_SRC_DIR):
-    """读 GPS_ITRF08.gmt → DataFrame（psvelo 9 列具名）。
+    """Read GPS_ITRF08.gmt → DataFrame (psvelo 9 named columns).
 
-    契约：22511 行 × 9 列、逐行 9 字段（psvelo 无表头；缺字段行在
-    keep_default_na=False 下会静默变 ""，故逐行 token 数显式校验）。
-    lon 保留 0..360 原值（卷绕在落格器内做，侧车另附 lon_180 列）。
-    keep_default_na=False：站码/研究名字面 "NA" 原样保留（pandas 默认
-    吞成 NaN——poles 北美板块码 NA 实证踩此坑）。
+    Contract: 22511 rows × 9 columns, 9 fields per row (psvelo has no header;
+    rows with missing fields would silently become "" under
+    keep_default_na=False, so the per-row token count is explicitly validated).
+    lon keeps its 0..360 raw value (wrapping is done inside the grid-assigner;
+    the sidecar adds a separate lon_180 column). keep_default_na=False:
+    literal "NA" in station/study names is preserved as-is (pandas would
+    otherwise swallow it into NaN—verified pitfall with the poles North America
+    plate code NA).
     """
     import pandas as pd
 
@@ -131,13 +145,16 @@ def load_gsrm_gps(src_dir: str | Path = GSRM_SRC_DIR):
 
 
 def load_gsrm_poles(src_dir: str | Path = GSRM_SRC_DIR):
-    """读 4 个 poles.* 欧拉极表 → 合并 DataFrame（frame 列区分框架）。
+    """Read the 4 poles.* Euler-pole tables → merged DataFrame (frame column
+    distinguishes frames).
 
-    格式（README 自证 + 磁盘实测）：lat lon rate(deg/Ma) plate 四列——
-    列序 lat 在前，与 GPS 文件 lon 在前相反；poles.PA 末 3 行为其他
-    参考系相对 PA 的旋转（负速率），原样保留。plate 码 "NA" = 北美
-    板块（keep_default_na=False 防 pandas 吞成 NaN；缺字段行同样会
-    静默变 ""，故逐行 token 数显式校验）。
+    Format (self-documented in the README + measured on disk): four columns
+    lat lon rate(deg/Ma) plate—the column order has lat first, opposite to the
+    GPS files which have lon first; the last 3 rows of poles.PA are rotations
+    of other reference frames relative to PA (negative rate), kept as-is. The
+    plate code "NA" = North America plate (keep_default_na=False prevents
+    pandas from swallowing it into NaN; rows with missing fields would likewise
+    silently become "", so the per-row token count is explicitly validated).
     """
     import pandas as pd
 
@@ -160,18 +177,21 @@ def load_gsrm_poles(src_dir: str | Path = GSRM_SRC_DIR):
     return pd.concat(frames, ignore_index=True)
 
 
-# ---------------- 点 → 像元计数器（通道机制，热流点集复用） ----------------
 
 def points_to_density(lat, lon, tier: str) -> np.ndarray:
-    """点坐标 → 档位计数网格（uint32，纯函数，源无关）。
+    """Point coordinates → tier count grid (uint32, pure function,
+    source-agnostic).
 
-    语义：点落入像元 [−90+r·res, −90+(r+1)·res) × [−180+c·res,
-    −180+(c+1)·res) 即计 1（行 0 = −90 侧、列 0 = −180 侧，与
-    tier_centers 同一套行/列数学）。经度先卷绕到 [-180, 180)——WSM
-    ±180 制与 GSRM 0..360 制均适用（180 ≡ −180 同一子午线 → 列 0）；
-    lat=90 极点边缘归最北胞（数据无此点，防御性裁剪）。
+    Semantics: a point falling into cell [−90+r·res, −90+(r+1)·res) ×
+    [−180+c·res, −180+(c+1)·res) counts as 1 (row 0 = −90 side, column 0 =
+    −180 side, the same row/column math as tier_centers). Longitude is first
+    wrapped to [-180, 180)—both the WSM ±180 convention and the GSRM 0..360
+    convention apply (180 ≡ −180 same meridian → column 0); the lat=90 pole
+    edge falls into the northernmost cell (no such point in the data;
+    defensive clip).
 
-    计数守恒：Σ网格 = len(lat)（构造性保证，落格器不做任何丢弃）。
+    Count conservation: Σgrid = len(lat) (guaranteed by construction; the
+    grid-assigner discards nothing).
     """
     nlat, nlon = grid_shape(tier)
     res = tier_deg(tier)
@@ -185,23 +205,25 @@ def points_to_density(lat, lon, tier: str) -> np.ndarray:
         raise ValueError("纬度出界 [-90, 90]")
     lon_w = wrap_lon180(lon)
     row = np.clip(np.floor((lat + 90.0) / res).astype(np.int64), 0, nlat - 1)
-    # lon_w ∈ [−180, 180) ⇒ col ∈ [0, nlon)；浮点残差防御性裁剪
     col = np.clip(np.floor((lon_w + 180.0) / res).astype(np.int64), 0, nlon - 1)
     counts = np.bincount(row * nlon + col, minlength=nlat * nlon)
     return counts.astype(np.uint32).reshape(nlat, nlon)
 
 
 def wrap_lon180(lon) -> np.ndarray:
-    """经度卷绕到 [-180, 180)（0..360 制 ↔ ±180 制统一；180 ≡ −180）。
+    """Wrap longitude to [-180, 180) (unifies the 0..360 ↔ ±180 conventions;
+    180 ≡ −180).
 
-    落格器与 GSRM 侧车 lon_180 列共用的唯一实现。
+    The single implementation shared by the grid-assigner and the GSRM sidecar
+    lon_180 column.
     """
     lon = np.asarray(lon, dtype=np.float64)
     return ((lon + 180.0) % 360.0) - 180.0
 
 
 def _aggregation_factor(tier: str) -> int:
-    """主档 3′ → 目标档聚合因子（grids.aggregation_factor 薄包装，模块内惯用名）。"""
+    """Home tier 3′ → target tier aggregation factor (thin wrapper around
+    grids.aggregation_factor, module-local idiomatic name)."""
     return aggregation_factor(tier, HOME_TIER)
 
 
@@ -209,17 +231,21 @@ _HOME_CACHE: dict[str, np.ndarray] = {}
 
 
 def _home_density(cache_key: str, lat, lon) -> np.ndarray:
-    """主档（3′）密度网格（进程内缓存：同层四档只落格一次）。"""
+    """Home-tier (3′) density grid (in-process cache: the four tiers of the
+    same layer are assigned to cells only once)."""
     if cache_key not in _HOME_CACHE:
         _HOME_CACHE[cache_key] = points_to_density(lat, lon, HOME_TIER)
     return _HOME_CACHE[cache_key]
 
 
 def wsm_locatable_mask(df) -> np.ndarray:
-    """WSM 表可定位行掩码（LAT/LON 非空）+ 行数契约校验（唯一实现）。
+    """WSM table locatable-row mask (LAT/LON non-null) + row-count contract
+    validation (single implementation).
 
-    密度层（落格）与侧车导出器（空几何）共用——两处口径必然一致。
-    漂移即显式失败：源更新或空坐标行数变化须复核 count_semantics。
+    Shared by the density layer (grid assignment) and the sidecar exporter
+    (empty geometries)—the two are necessarily consistent. Drift fails
+    explicitly: a source update or a change in the number of empty-coordinate
+    rows requires reviewing count_semantics.
     """
     mask = (df["LAT"].notna() & df["LON"].notna()).to_numpy()
     n_loc = int(mask.sum())
@@ -232,7 +258,8 @@ def wsm_locatable_mask(df) -> np.ndarray:
 
 
 def wsm_home_density(src_dir: str | Path = WSM_SRC_DIR) -> np.ndarray:
-    """WSM 主档密度：可定位记录行（空坐标行不计数，count_semantics）。"""
+    """WSM home-tier density: locatable record rows (empty-coordinate rows are
+    not counted, per count_semantics)."""
     key = f"wsm:{Path(src_dir).resolve()}"
     if key not in _HOME_CACHE:
         df = load_wsm_points(src_dir)
@@ -244,7 +271,8 @@ def wsm_home_density(src_dir: str | Path = WSM_SRC_DIR) -> np.ndarray:
 
 
 def gsrm_home_density(src_dir: str | Path = GSRM_SRC_DIR) -> np.ndarray:
-    """GSRM 主档密度：GPS_ITRF08.gmt 全部 22511 观测记录行。"""
+    """GSRM home-tier density: all 22511 observation record rows of
+    GPS_ITRF08.gmt."""
     key = f"gsrm:{Path(src_dir).resolve()}"
     if key not in _HOME_CACHE:
         df = load_gsrm_gps(src_dir)
@@ -254,15 +282,16 @@ def gsrm_home_density(src_dir: str | Path = GSRM_SRC_DIR) -> np.ndarray:
     return _HOME_CACHE[key]
 
 
-# ---------------- 层构建 ----------------
 
 def density_dataarray(entry: LayerEntry, tier: str, home: np.ndarray,
                       long_name: str, extra_attrs: dict) -> xr.DataArray:
-    """密度层公共装配：主档直出 / 粗档 sum 聚合 + attrs 模板。
+    """Common density-layer assembly: home tier emitted directly / coarser
+    tiers aggregated with sum + attrs template.
 
-    点密度通道的共享装配（供 WSM/GSRM 与热流点集复用）。
-    extra_attrs 至少含 source_file/count_semantics，可带 doi/license_note
-    等白名单溯源键（manifest 透传）。
+    Shared assembly for the point-density channel (reused by WSM/GSRM and the
+    heat-flow point set). extra_attrs contains at least
+    source_file/count_semantics and may carry whitelisted provenance keys such
+    as doi/license_note (passed through to the manifest).
     """
     if tier == HOME_TIER:
         values = home
@@ -287,7 +316,8 @@ def density_dataarray(entry: LayerEntry, tier: str, home: np.ndarray,
 
 
 def build_wsm_density(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 stress_kinematics__wsm_density（uint32 计数层，免掩膜）。"""
+    """Build this tier's stress_kinematics__wsm_density (uint32 count layer,
+    mask-free)."""
     return density_dataarray(
         entry, tier, wsm_home_density(),
         "WSM 2025 应力观测点密度（每像元可定位记录数）",
@@ -296,7 +326,8 @@ def build_wsm_density(entry: LayerEntry, tier: str) -> xr.DataArray:
 
 
 def build_gsrm_gps_density(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 stress_kinematics__gsrm_gps_density（uint32，internal）。"""
+    """Build this tier's stress_kinematics__gsrm_gps_density (uint32,
+    internal)."""
     return density_dataarray(
         entry, tier, gsrm_home_density(),
         "GSRM GPS 站点观测密度（GPS_ITRF08.gmt 每像元记录数）",
@@ -313,7 +344,6 @@ def build_gsrm_gps_density(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
 POINT_DENSITY_LAYERS = {
     WSM_LAYER_ID: {
@@ -331,16 +361,18 @@ POINT_DENSITY_LAYERS = {
 
 def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                                         src_dir=None) -> dict:
-    """保真报告（计数层判据：总和守恒）：
+    """Fidelity report (count-layer criterion: total conservation):
 
-    ① store 与源重算逐位一致（硬判据——重算 = 落格器 bincount + sum 核
-       同码路径，捕获写入/存储链路错位）；
-    ② 跨档 sum 一致性（硬判据）：粗档 store 值 == 主档 store 值的 sum
-       聚合——以 store 自身为源，独立于 ①；
-    ③ 计数守恒（硬判据，验收）：各档计数总和 == 计数基准
-       （WSM 可定位 100672 / GSRM 22511）；
-    ④ dtype uint32 + 值域 ≥ 0（硬判据，粗错捕捉器）；
-    ⑤ 占用像元/最大计数/三数（报告制）。
+    ① store bit-for-bit consistent with the recomputation from source (hard
+       criterion—recomputation = grid-assigner bincount + sum kernel on the
+       same code path, catching write/storage-chain misplacement);
+    ② cross-tier sum consistency (hard criterion): coarse-tier store values ==
+       sum-aggregation of home-tier store values—using the store itself as
+       source, independent of ①;
+    ③ count conservation (hard criterion, acceptance): each tier's count total
+       == the count basis (WSM locatable 100672 / GSRM 22511);
+    ④ dtype uint32 + value range ≥ 0 (hard criterion, coarse-error catcher);
+    ⑤ occupied cells / max count / three counts (report-only).
     """
     spec = POINT_DENSITY_LAYERS[layer_id]
     home = spec["home"](src_dir) if src_dir else spec["home"]()
@@ -355,7 +387,6 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
             v = node.ds[layer_id].values
             values[tier] = v
 
-            # ① 逐位一致（硬判据）
             expect = home if tier == HOME_TIER else aggregate_sum(
                 home, _aggregation_factor(tier)
             )
@@ -366,7 +397,6 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-            # ③ 计数守恒（硬判据）
             total = int(v.sum(dtype=np.uint64))
             checks.append({
                 "name": f"{tier}: 计数守恒（总和 == 计数基准 {spec['expected_total']}）",
@@ -374,15 +404,13 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
                 "summary": f"总和 {total} vs 基准 {spec['expected_total']}",
             })
 
-            # ④ dtype + 值域（硬判据）
-            bad = int((v < 0).sum())   # uint32 恒 0；防 dtype 漂移后负值
+            bad = int((v < 0).sum())
             checks.append({
                 "name": f"{tier}: dtype uint32 且值域 ≥ 0",
                 "status": "pass" if (v.dtype == np.uint32 and bad == 0) else "FAIL",
                 "summary": f"dtype {v.dtype}，负值 {bad}（期望 0）",
             })
 
-        # ② 跨档 sum 一致性（硬判据）：以 store 自身为源
         for tier in tiers:
             if tier == HOME_TIER:
                 continue
@@ -394,7 +422,6 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-        # ⑤ 占用像元/最大计数（报告制）
         for tier in tiers:
             v = values[tier]
             checks.append({
@@ -406,7 +433,6 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
                 ),
             })
 
-    # GSRM 三数（硬判据：源文件漂移即 FAIL）
     if layer_id == GSRM_LAYER_ID:
         df = load_gsrm_gps(src_dir) if src_dir else load_gsrm_gps()
         three = (
@@ -429,7 +455,7 @@ def build_point_density_fidelity_report(store_dir, layer_id: str, tiers: list[st
     return {
         "layer": layer_id,
         "store": str(store_dir),
-        "integral_tolerance": INTEGRAL_TOL,   # 计数层无积分量；保留报告器统一字段
+        "integral_tolerance": INTEGRAL_TOL,
         "result": "FAIL" if n_fail else "PASS",
         "n_checks": len(checks),
         "checks": checks,

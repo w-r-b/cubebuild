@@ -1,40 +1,40 @@
-"""GSRM 应变场通道：v2.2 0.1° 全球应变网格 → 四层三档。
+"""GSRM strain-field channel: v2.2 0.1° global strain grid → four layers, three tiers.
 
-stress_kinematics__gsrm_exx / eyy / exy / vorticity（均 internal，主档 6min，
-1°/30′/6′ 三档保守核降采样 + 有效性掩膜伴生）。
+stress_kinematics__gsrm_exx / eyy / exy / vorticity (all internal, primary tier 6min,
+1°/30′/6′ conservative-kernel downsampling + validity-mask sidecar).
 
-源契约（磁盘实证，v2.2/GSRM_strain.txt = GSRM_strain.txt.Z 解压版
-554872103 B、6305376 行）：
+Source contract (disk-verified; v2.2/GSRM_strain.txt = extracted GSRM_strain.txt.Z,
+554872103 B, 6305376 lines):
 
-- 结构：25 行头（Version 2.2（2015-12 版）；GEM Foundation
-  CC-BY-NC-SA 3.0）+ 6300000 完整网格数据行 + 5351 行尾部离格块。
-- 网格：pixel 注册 0.1°——lat -87.45..87.45（1750 行升序）× lon
-  -179.95..179.95（3600 列），行主序（lat 外循环、lon 内循环），完整
-  覆盖无重复（逐行与索引数学比对，偏差 ≤ 6e-14 = 1 ulp 量级）。中心
-  0.05 相位＝源胞边对齐 -180/±87.5（保守核 lon_phase = 1/20，6′ 档
-  恒等映射）。极冠 |lat|>87.5 源网格天然不含 → 各档极区行 NaN、有效
-  性掩膜 0（覆盖缺口如实保留，不做外推）。全数值无缺测（11 列严格
-  数值 token 扫描 0 非数值；无 NaN/999 类哨兵）。
-- 列：lat long exx eyy exy vorticity RL-NLC LL-NLC e1 e2 azi_e1。本组收
-  前四列；e1/e2/azi_e1 不收（特征分解是确定性代数运算，下游可由三分量
-  自算）；RL-NLC/LL-NLC 源头与 README 均未给出语义定义，
-  v1 映射未收录。
-- 单位：README 自证 "GSRM_strain.txt.Z … units are 1e-9/yr"（文件头无
-  单位行）→ exx/eyy/exy = nano-strain/yr、vorticity = nano-rad/yr
-  （unit_basis 登记 manifest）。值域（磁盘实证）：exx -12142.4..11638.6 /
+- Structure: 25-line header (Version 2.2 (2015-12); GEM Foundation
+  CC-BY-NC-SA 3.0) + 6300000 complete grid data rows + a 5351-line trailing off-grid block.
+- Grid: pixel registration 0.1° — lat -87.45..87.45 (1750 ascending rows) × lon
+  -179.95..179.95 (3600 columns), row-major (lat outer loop, lon inner loop), complete
+  coverage without duplicates (row-by-row vs. index arithmetic, deviation ≤ 6e-14 = 1 ulp level). Center
+  phase 0.05 = source cell edge aligned to -180/±87.5 (conservative kernel lon_phase = 1/20, 6′ tier
+  identity mapping). The polar cap |lat|>87.5 is naturally absent from the source grid → each tier's polar rows are NaN, validity
+  mask 0 (coverage gap preserved as-is, no extrapolation). All values non-missing (strict
+  numeric-token scan of 11 columns finds 0 non-numeric; no NaN/999-type sentinels).
+- Columns: lat long exx eyy exy vorticity RL-NLC LL-NLC e1 e2 azi_e1. This group keeps
+  the first four columns; e1/e2/azi_e1 are excluded (eigen-decomposition is a deterministic algebraic operation, downstream can
+  compute it from the three components); neither the source nor the README gives a semantic definition for RL-NLC/LL-NLC,
+  so the v1 mapping does not include them.
+- Units: README self-attests "GSRM_strain.txt.Z … units are 1e-9/yr" (the file header has no
+  unit line) → exx/eyy/exy = nano-strain/yr, vorticity = nano-rad/yr
+  (unit_basis recorded in manifest). Value ranges (disk-verified): exx -12142.4..11638.6 /
   eyy -12146.2..14150.9 / exy -17129.9..10840.5 / vorticity
-  -895.326..1210.912。
-- 尾部离格块（物理行 6300026..6305376，5351 行）：3 零行 + 1070 索引行
-  （field1 = 1.000..1070.000、lon = 0.000、exx = -87.5 常量）各随 4 零行
-  （末索引行后 2 零行）。索引行 801..1070 带自洽应变张量值（e1/e2/azi_e1
-  与 exx/eyy/exy 特征分解吻合，已验算）但坐标全部离格（整数 lat 与
-  0.000 距最近网格中心 0.05°）。v2.1 同名文件无此块（6300025 行整）且
-  官方 v2.2 目录无 README/changelog——判定为 v2.2 构建残留，剔除不入
-  立方；剔除量读取期契约化（总行数 / 网格完整性 / 尾部全离格三项断言，
-  源变更即显式失败）。
+  -895.326..1210.912.
+- Trailing off-grid block (physical rows 6300026..6305376, 5351 rows): 3 zero rows + 1070 index rows
+  (field1 = 1.000..1070.000, lon = 0.000, exx = -87.5 constant) each accompanied by 4 zero rows
+  (2 zero rows after the last index row). Index rows 801..1070 carry self-consistent strain-tensor values (e1/e2/azi_e1
+  agree with the eigen-decomposition of exx/eyy/exy, already verified) but all coordinates are off-grid (integer lat and
+  0.000 at 0.05° from the nearest grid center). The v2.1 file of the same name lacks this block (6300025 rows intact) and
+  the official v2.2 directory has no README/changelog — judged as a v2.2 build artifact, excluded from the
+  cube; the exclusion is contractualized at read time (three assertions: total row count / grid completeness / trailing all-off-grid;
+  a source change fails explicitly).
 
-可见性：internal（文件头 GEM Foundation CC-BY-NC-SA 3.0（NC+SA
-双条款），不符合开放许可要求，不纳入公开版，论文建议读者自行联用）。
+Visibility: internal (file header GEM Foundation CC-BY-NC-SA 3.0 (NC+SA
+clauses), does not meet open-license requirements, excluded from the public version; the paper recommends readers combine it themselves).
 """
 
 from dataclasses import dataclass
@@ -53,12 +53,9 @@ from .kernels import conservative_overlap_mean
 from .pixel_area import EARTH_RADIUS_KM
 from .points import GSRM_DOI, GSRM_SRC_DIR
 
-# v2.2 解压版（数据已落盘）
 GSRM_V22_DIR = GSRM_SRC_DIR / "v2.2"
 STRAIN_FILE = "GSRM_strain.txt"
 
-# 四层规约（层 id → 源列 + 分位数直方图几何 (lo, hi, bin_width) 覆盖各层
-# 源值域 + 单位文案）——构建路由与保真分派共用（STRAIN_FIELD_OF 由此派生）
 STRAIN_LAYERS = {
     "stress_kinematics__gsrm_exx": {
         "field": "exx", "hist_spec": (-12500.0, 12500.0, 1.0), "unit": "nano-strain/yr",
@@ -76,18 +73,15 @@ STRAIN_LAYERS = {
 
 STRAIN_FIELD_OF = {lid: spec["field"] for lid, spec in STRAIN_LAYERS.items()}
 
-# 源契约常量（磁盘实证的契约化；源变更即读取期显式失败）
-HEADER_LINES = 25                        # 24 '#' 头 + 1 列名行
+HEADER_LINES = 25
 GRID_NLAT, GRID_NLON = 1750, 3600        # lat -87.45..87.45 × lon -179.95..179.95
-GRID_ROWS = GRID_NLAT * GRID_NLON        # 6300000 完整网格行
-TRAILING_ROWS = 5351                     # 尾部离格块（v2.2 构建残留，剔除）
+GRID_ROWS = GRID_NLAT * GRID_NLON
+TRAILING_ROWS = 5351
 
-SRC_TENTH = Fraction(1, 10)              # 0.1° 源分辨率（精确有理数）
-LON_PHASE = Fraction(1, 20)              # 中心 0.05 相位＝胞边对齐 -180
-LAT_SOUTH_K = 25                         # 源南缘 -87.5 = -90 + 25×0.1（边索引基）
+SRC_TENTH = Fraction(1, 10)
+LON_PHASE = Fraction(1, 20)
+LAT_SOUTH_K = 25
 
-# 坐标比对容差：文件值 2–3 位小数、离格坐标距中心 ≥ 0.05°，1e-6 仅吸收
-# 文本解析与索引数学间的 1 ulp 差（实测 ≤ 6e-14）
 _COORD_TOL = 1e-6
 
 UNIT_BASIS = (
@@ -98,7 +92,6 @@ UNIT_BASIS = (
     "变形带旋转率 nrad/yr 量级自洽（若为 1e-9 deg/yr 则小 4–5 个量级）】"
 )
 
-# 四层值域（磁盘实证；保真报告源契约判据）
 VALUE_RANGES = {
     "exx": (-12142.4, 11638.6), "eyy": (-12146.2, 14150.9),
     "exy": (-17129.9, 10840.5), "vorticity": (-895.326, 1210.912),
@@ -127,16 +120,16 @@ _LONG_NAMES = {
 
 @dataclass
 class StrainSource:
-    """规范化应变源：fields 四分量 (1750, 3600) float32，行 0 = -87.5 侧。
+    """Normalized strain source: fields four components (1750, 3600) float32, row 0 = -87.5 side.
 
-    raster(field) 供保守核与源统计以 RasterSource 视图复用（几何共享）。
+    raster(field) reuses RasterSource views for the conservative kernel and source statistics (shared geometry).
     """
 
     fields: dict[str, np.ndarray]
     lat_edges: np.ndarray               # (1751,) -87.5..87.5
     lon_res: Fraction
     lon_phase: Fraction
-    n_trailing: int                     # 剔除的尾部离格行数（契约报告用）
+    n_trailing: int
 
     def raster(self, field: str) -> RasterSource:
         v = self.fields[field]
@@ -149,25 +142,22 @@ class StrainSource:
         )
 
 
-# ---------------- 源读取 ----------------
 
 def load_gsrm_strain(src_dir: str | Path = GSRM_V22_DIR) -> StrainSource:
-    """读 v2.2/GSRM_strain.txt → StrainSource（尾部离格块剔除）。
+    """Read v2.2/GSRM_strain.txt → StrainSource (trailing off-grid block excluded).
 
-    契约（三项断言，源变更即显式失败）：
-    ① 总数据行 = 6305351（25 头跳过）；
-    ② 前 6300000 行 = 完整规则网格：行 i 坐标 == (lat[i//3600], lon[i%3600])
-       索引数学（容差 1e-6，仅吸收 1 ulp）——完整性与行主序一并保证；
-    ③ 尾部 5351 行全部离格（lat/lon 距最近网格中心 > 1e-6）——若源更新
-       把有效网格点挪进尾部，此断言拦截静默丢点。
+    Contract (three assertions; a source change fails explicitly):
+    ① total data rows = 6305351 (25 header rows skipped);
+    ② first 6300000 rows = complete regular grid: row i coordinates == (lat[i//3600], lon[i%3600])
+       index arithmetic (tolerance 1e-6, absorbs only 1 ulp) — completeness and row-major order together;
+    ③ trailing 5351 rows all off-grid (lat/lon > 1e-6 from the nearest grid center) — if a source update
+       moves a valid grid point into the trailing block, this assertion catches the silent point loss.
     """
     import pandas as pd
 
     path = Path(src_dir) / STRAIN_FILE
     if not path.is_file():
         raise FileNotFoundError(f"GSRM v2.2 应变源不存在: {path}（.Z 解压版）")
-    # usecols 只取 lat/long + 四目标列（0..5）；网格几何常量调用期解析
-    # （定义期绑定会使测试缩格注入失效）
     nlat, nlon = GRID_NLAT, GRID_NLON
     grid_rows = nlat * nlon
     trailing_rows = TRAILING_ROWS
@@ -183,7 +173,6 @@ def load_gsrm_strain(src_dir: str | Path = GSRM_V22_DIR) -> StrainSource:
 
     la = df.iloc[:grid_rows, 0].to_numpy()
     lo = df.iloc[:grid_rows, 1].to_numpy()
-    # ② 完整网格：行主序索引数学比对（完整 + 有序 + 无重复三位一体）
     r_idx = np.repeat(np.arange(nlat), nlon)
     c_idx = np.tile(np.arange(nlon), nlat)
     if np.abs(la - (-87.45 + 0.1 * r_idx)).max() > _COORD_TOL:
@@ -191,7 +180,6 @@ def load_gsrm_strain(src_dir: str | Path = GSRM_V22_DIR) -> StrainSource:
     if np.abs(lo - (-179.95 + 0.1 * c_idx)).max() > _COORD_TOL:
         raise ValueError(f"{STRAIN_FILE}: 网格行经度偏离 -179.95+0.1m 列循环")
 
-    # ③ 尾部全离格（searchsorted 最近中心距离；离格 ≥ 0.05°）
     t = df.iloc[grid_rows:].to_numpy()
     if not np.isfinite(t).all():
         raise ValueError(f"{STRAIN_FILE}: 尾部块含非有限值（实证全数值）")
@@ -215,11 +203,6 @@ def load_gsrm_strain(src_dir: str | Path = GSRM_V22_DIR) -> StrainSource:
         name: values[:, j].reshape(nlat, nlon).astype(np.float32)
         for j, name in enumerate(("exx", "eyy", "exy", "vorticity"))
     }
-    # 源胞纬度边必须与档位网格同式计算（-90 + 0.1·k，k = 25..1775）：
-    # 0.1 非二进制精确，-87.5+0.1·k 与 -90+0.1·(25+k) 两条路径在个别 k
-    # 差 1 ulp——保守核行窗按边二分，1 ulp 错位使邻行泄入 ~1e-16 相对权，
-    # 6′ 恒等破位级（实测 349 胞偏移 ~1e-10）。同式即逐位一致；
-    # 30′/1° 共享边（k≡0 mod 5/10）经 fl(0.1·5p)=0.5p 精确性同样对齐。
     lat_edges = -90.0 + 0.1 * np.arange(LAT_SOUTH_K, LAT_SOUTH_K + nlat + 1, dtype=np.float64)
     return StrainSource(
         fields=fields,
@@ -234,17 +217,16 @@ _SOURCE_CACHE: dict[str, StrainSource] = {}
 
 
 def _strain_source(src_dir: str | Path = GSRM_V22_DIR) -> StrainSource:
-    """进程内缓存（~4 s 解析，四层 × 三档只读一次）。"""
+    """In-process cache (~4 s to parse; four layers × three tiers read once)."""
     key = f"strain:{Path(src_dir).resolve()}"
     if key not in _SOURCE_CACHE:
         _SOURCE_CACHE[key] = load_gsrm_strain(src_dir)
     return _SOURCE_CACHE[key]
 
 
-# ---------------- 层构建 ----------------
 
 def build_gsrm_strain_layer(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 GSRM 应变四层之一（exx/eyy/exy/vorticity，internal）。"""
+    """Build one of the four GSRM strain layers for this tier (exx/eyy/exy/vorticity, internal)."""
     field = STRAIN_FIELD_OF[entry.id]
     src = _strain_source()
     values, _W = conservative_overlap_mean(
@@ -277,18 +259,17 @@ def build_gsrm_strain_layer(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
 
 def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> dict:
-    """保真报告（组同构判据 + 源契约判据）：
+    """Fidelity report (group-isomorphic criteria + source-contract criteria):
 
-    ① store 与源核重算逐位一致（float32 位级，NaN 感知）；
-    ② 有效位与源掩膜复算一致（极冠缺口两通道同源）；
-    ③ 积分量守恒（< 0.1% 硬判据）+ 分位数偏移（报告制）；
-    ④ 覆盖率（报告制：源极冠缺口的档位几何预期）；
-    ⑤ 源契约（硬判据）：完整网格 6300000 行 + 尾部剔除 5351 行 + 值域
-       四数（读取器已断言，此处以契约常量复报——漂移即 FAIL）。
+    ① store vs. source-kernel recompute bit-identical (float32 bit level, NaN-aware);
+    ② valid mask vs. source-mask recompute consistent (polar-cap gap from the same source in both channels);
+    ③ integral quantity conserved (< 0.1% hard criterion) + quantile offset (report-mode);
+    ④ coverage (report-mode: the tier geometry expected from the source polar-cap gap);
+    ⑤ source contract (hard criterion): complete grid 6300000 rows + trailing exclusion 5351 rows + value ranges
+       four numbers (the reader already asserts these; here re-reported from contract constants — drift means FAIL).
     """
     spec = STRAIN_LAYERS[layer_id]
     src = _strain_source()
@@ -309,7 +290,6 @@ def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]
             )
             ok = W > 0
 
-            # ① 逐位一致（NaN == NaN 视为一致）
             eq = (v == expect) | (np.isnan(v) & np.isnan(expect))
             n_bad = int((~eq).sum())
             checks.append({
@@ -318,7 +298,6 @@ def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-            # ② 有效位一致性
             mism = int((np.isfinite(v) != ok).sum())
             checks.append({
                 "name": f"{tier}: 有效位与源掩膜复算一致（逐位）",
@@ -326,7 +305,6 @@ def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]
                 "summary": f"不一致 {mism} 像元（期望 0）",
             })
 
-            # ③ 积分 + 分位数（fidelity_checks）
             tier_stats = {
                 "sum_va": float(np.dot(v[ok].astype(np.float64), W[ok])),
             }
@@ -337,7 +315,6 @@ def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]
             )
             checks.extend(fidelity_checks(src_stats, tier_stats, tier, hist_spec=hist_spec, unit=spec["unit"]))
 
-            # ④ 覆盖率（报告制）：极冠缺口 = 源纬度带 [-87.5, 87.5] 的档位几何
             checks.append({
                 "name": f"{tier}: 覆盖率（报告制，极冠缺口）",
                 "status": "report",
@@ -348,8 +325,6 @@ def build_gsrm_strain_fidelity_report(store_dir, layer_id: str, tiers: list[str]
                 ),
             })
 
-    # ⑤ 源契约（硬判据）：读取器断言的契约常量复报（非同义反复——
-    # 对加载结果断言，几何/剔除量漂移即 FAIL）
     shape = src.fields["exx"].shape
     grid_ok = shape == (GRID_NLAT, GRID_NLON) and GRID_NLAT * GRID_NLON == GRID_ROWS == 6300000
     checks.append({

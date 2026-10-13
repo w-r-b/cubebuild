@@ -1,18 +1,27 @@
-"""发布执行单与「占位串零残留」检索工具的判据。
+"""Criteria for the release runbook and the "zero-residue placeholder string" scan tool.
 
-两部分：
-- 执行单结构：执行序表逐行标注「人工／自动」与前置条件；步骤链首现序
-  （建私有仓 → 回填手稿 → 投稿提交 → 转公开 → Zenodo-GitHub 绑定 →
-  铸造代码 DOI → 回填 CITATION → 零残留检索）严格递增；两份移交要件
-  （冻结清单净化、公开仓 .gitignore）落在执行序内；硬约束句齐备
-  （转公开两侧时点、代码 DOI 铸造约束、同批回填、人工步骤声明）；
-  检索词表与工具词表锁定（防双面漂移）。以上判据均带合成件负例。
-- 检索工具：合成件基准（全回填零命中）＋负例（人为保留一处占位必须命中）＋
-  四类占位串全覆盖（含大小写变体）＋目标缺件 fail-closed＋默认范围覆盖
-  手稿与公开仓四件要件＋CLI 退出码 0／1／2。
+Two parts:
+- Runbook structure: each row of the execution-order table is annotated with
+  "manual/automatic" and its precondition; the first-occurrence order of the
+  step chain (create private repo -> backfill manuscript -> submit to journal
+  -> make public -> Zenodo-GitHub binding -> mint code DOI -> backfill
+  CITATION -> zero-residue scan) is strictly increasing; the two handover
+  artifacts (freeze-manifest sanitization, public-repo .gitignore) fall within
+  the execution order; the hard-constraint sentences are all present
+  (the two time points around making public, the code DOI minting constraint,
+  same-batch backfill, the manual-step declaration); the scan word registry and
+  the tool word registry are locked together (guarding against two-sided
+  drift). All the above criteria come with synthetic-artifact negative cases.
+- Scan tool: synthetic-artifact baseline (fully backfilled, zero hits) plus
+  negative cases (a deliberately retained placeholder must be hit) plus full
+  coverage of the four placeholder-string families (including case variants)
+  plus fail-closed on missing targets plus the default scope covering the
+  manuscript and the four public-repo essentials plus CLI exit codes 0/1/2.
 
-私有侧制品不在本工作区（公开仓）时整体跳过（沿用缺件跳过惯例）。
-本模块随测试套件进入公开面，其文本受公开面痕迹扫描约束。
+When the private-side artifacts are not present in this workspace (public
+repo), the whole module is skipped (following the missing-artifact skip
+convention). This module ships with the test suite onto the public face, so
+its text is subject to public-face trace scanning.
 """
 
 from __future__ import annotations
@@ -55,7 +64,6 @@ def tool():
     return _load(TOOL, "placeholder_scan")
 
 
-# ---------- 合成件（供检索工具判据与负例使用） ----------
 
 MANUSCRIPT_SAMPLE = (
     "The public data are published on Zenodo as a single tar package "
@@ -77,7 +85,7 @@ ESSENTIALS_SAMPLE = (
 
 
 def _fake_tree(tmp_path: Path, manuscript_text: str) -> Path:
-    """私有仓最小同构树：手稿＋四件要件。"""
+    """Minimal isomorphic tree of the private repo: manuscript plus the four essentials."""
     root = tmp_path / "root"
     (root / "paper" / "manuscript").mkdir(parents=True)
     (root / "paper" / "manuscript" / "SEDC-manuscript-nsd-en.md").write_text(
@@ -87,12 +95,11 @@ def _fake_tree(tmp_path: Path, manuscript_text: str) -> Path:
     return root
 
 
-# ---------- 检索工具判据 ----------
 
 
 @skip_no_tool
 def test_scan_filled_sample_is_clean(tool, tmp_path):
-    """基准：全回填合成件零命中（保证下述负例由占位触发而非夹具故障）。"""
+    """Baseline: a fully backfilled synthetic artifact yields zero hits (ensuring the negative cases below are triggered by placeholders rather than fixture faults)."""
     f = tmp_path / "manuscript.md"
     f.write_text(FILLED_MANUSCRIPT, encoding="utf-8")
     assert tool.scan_file(f) == []
@@ -100,11 +107,11 @@ def test_scan_filled_sample_is_clean(tool, tmp_path):
 
 @skip_no_tool
 def test_negative_retained_single_placeholder_hits(tool, tmp_path):
-    """负例：人为保留一处占位，检索必须命中，且只命中保留的那一处。"""
+    """Negative case: a single deliberately retained placeholder must be hit, and only that one must be hit."""
     f = tmp_path / "manuscript.md"
 
     f.write_text(MANUSCRIPT_SAMPLE, encoding="utf-8")
-    assert len(tool.scan_file(f)) == 2  # 两处俱在时两处皆中
+    assert len(tool.scan_file(f)) == 2
 
     retained = MANUSCRIPT_SAMPLE.replace(
         "repository URL to be filled in", "https://github.com/example/cubebuild")
@@ -118,7 +125,7 @@ def test_negative_retained_single_placeholder_hits(tool, tmp_path):
 
 @skip_no_tool
 def test_scan_detects_all_placeholder_token_families(tool, tmp_path):
-    """四类占位串逐一可检（含大小写变体：有角括号的声明式占位）。"""
+    """Each of the four placeholder-string families is detectable (including case variants: the declarative placeholder with angle brackets)."""
     f = tmp_path / "essentials.txt"
     f.write_text(ESSENTIALS_SAMPLE, encoding="utf-8")
     tokens = [tok for _ln, tok, _line in tool.scan_file(f)]
@@ -128,7 +135,7 @@ def test_scan_detects_all_placeholder_token_families(tool, tmp_path):
 
 @skip_no_tool
 def test_default_targets_cover_manuscript_and_essentials(tool):
-    """默认范围＝手稿＋四件要件；目标在当前工作区全部存在（缺件即 fail-closed）。"""
+    """Default scope = manuscript plus the four essentials; the targets all exist in the current workspace (a missing artifact is fail-closed)."""
     rels = [p.relative_to(REPO).as_posix() for p in tool.targets("all")]
     assert rels == [
         "paper/manuscript/SEDC-manuscript-nsd-en.md",
@@ -143,7 +150,7 @@ def test_default_targets_cover_manuscript_and_essentials(tool):
 
 @skip_no_tool
 def test_missing_target_fails_closed(tool, tmp_path):
-    """目标缺件不得当作零残留：missing 非空且不出现在命中里。"""
+    """A missing target must not be treated as zero residue: missing is non-empty and does not appear among the hits."""
     report = tool.report("all", root=tmp_path)
     assert len(report["missing"]) == 5
     assert report["hits"] == []
@@ -151,14 +158,14 @@ def test_missing_target_fails_closed(tool, tmp_path):
 
 @skip_no_tool
 def test_unknown_scope_rejected(tool):
-    """未知范围名即显式失败（fail-closed），不静默回退默认范围。"""
+    """An unknown scope name fails explicitly (fail-closed); it does not silently fall back to the default scope."""
     with pytest.raises(ValueError):
         tool.targets("everything")
 
 
 @skip_no_tool
 def test_cli_exit_codes(tool, tmp_path, monkeypatch):
-    """CLI 契约：0 零残留／1 命中／2 缺件。"""
+    """CLI contract: 0 zero residue, 1 hit, 2 missing artifact."""
     monkeypatch.setattr(sys, "argv", ["placeholder_scan.py", "--manuscript"])
 
     monkeypatch.setattr(tool, "REPO", _fake_tree(tmp_path / "clean", FILLED_MANUSCRIPT))
@@ -171,21 +178,20 @@ def test_cli_exit_codes(tool, tmp_path, monkeypatch):
     assert tool.main() == 2
 
 
-# ---------- 执行单结构判据 ----------
 
 CHAIN_ANCHORS = ("建私有仓", "回填手稿", "投稿提交", "转公开",
                  "Zenodo-GitHub 绑定", "铸造代码 DOI", "回填 CITATION", "零残留检索")
 RUNBOOK_CONSTRAINTS = (
-    "不得早于", "不得晚于",           # 转公开两侧时点
-    "不支持私有仓", "不能早于",        # 代码 DOI 铸造约束
-    "同批",                            # 同批回填
-    "人工步骤", "超出范围",            # 人工步骤声明
-    "四件要件",                        # 回填与检索范围
+    "不得早于", "不得晚于",
+    "不支持私有仓", "不能早于",
+    "同批",
+    "人工步骤", "超出范围",
+    "四件要件",
 )
 
 
 def _runbook_rows(text: str) -> list[list[str]]:
-    """「执行序」区内步骤表行（首列为数字的表行）。"""
+    """Step-table rows within the "execution order" section (table rows whose first column is a number)."""
     section = text.split("## 执行序", 1)[1].split("\n## ", 1)[0]
     rows = []
     for line in section.splitlines():
@@ -198,7 +204,7 @@ def _runbook_rows(text: str) -> list[list[str]]:
 
 
 def check_steps_annotated(rows: list[list[str]]) -> list[str]:
-    """每步骤五列齐备、标注人工／自动、前置条件非空；两份移交要件在执行序内。"""
+    """Each step has all five columns, is annotated manual/automatic, and has a non-empty precondition; the two handover artifacts fall within the execution order."""
     problems = []
     for cells in rows:
         if len(cells) != 5:
@@ -216,7 +222,7 @@ def check_steps_annotated(rows: list[list[str]]) -> list[str]:
 
 
 def check_chain_order(rows: list[list[str]]) -> list[str]:
-    """步骤链每锚的首现行号须严格递增。"""
+    """The first-occurrence row number of each anchor in the step chain must be strictly increasing."""
     joined = [" | ".join(c) for c in rows]
     problems = []
     positions = []
@@ -234,12 +240,12 @@ def check_chain_order(rows: list[list[str]]) -> list[str]:
 
 
 def check_constraints(text: str) -> list[str]:
-    """硬约束句齐备。"""
+    """All hard-constraint sentences are present."""
     return [f"执行单缺约束句: {t}" for t in RUNBOOK_CONSTRAINTS if t not in text]
 
 
 def check_token_registry(text: str, tokens) -> list[str]:
-    """执行单「检索词表」行的词条集合与工具词表一致（防双面漂移）。"""
+    """The entry set of the runbook's "scan word registry" line matches the tool word registry (guarding against two-sided drift)."""
     line = next((l for l in text.splitlines() if l.startswith("检索词表")), "")
     if not line:
         return ["执行单缺检索词表行"]
@@ -249,7 +255,6 @@ def check_token_registry(text: str, tokens) -> list[str]:
     return problems
 
 
-# ---------- 执行单：合成件基准与负例 ----------
 
 _SAMPLE_ROWS = [
     "| 1 | 建私有仓 | 人工 | 账号就绪 | 建 Private 空仓 |",
@@ -284,7 +289,7 @@ def _sample_runbook(rows: list[str] | None = None) -> str:
 
 @skip_no_runbook
 def test_runbook_structure_passes():
-    """真实执行单：四类结构判据全过。"""
+    """The real runbook: all four structural criteria pass."""
     text = RUNBOOK.read_text(encoding="utf-8")
     rows = _runbook_rows(text)
     assert len(rows) >= 15
@@ -295,7 +300,7 @@ def test_runbook_structure_passes():
 
 @skip_no_runbook
 def test_runbook_negative_examples():
-    """畸形合成件负例：以下四种变异各自必须被对应判据命中（判据可被证伪）。"""
+    """Malformed synthetic-artifact negative cases: each of the following four mutations must be caught by its corresponding criterion (the criteria are falsifiable)."""
     base = _sample_runbook()
     assert check_steps_annotated(_runbook_rows(base)) == []
     assert check_chain_order(_runbook_rows(base)) == []
@@ -307,7 +312,7 @@ def test_runbook_negative_examples():
     assert check_steps_annotated(_runbook_rows(annotated)) != []
 
     swapped = list(_SAMPLE_ROWS)
-    swapped[4], swapped[5] = swapped[5], swapped[4]  # 转公开 抢在 投稿提交 之前
+    swapped[4], swapped[5] = swapped[5], swapped[4]
     assert check_chain_order(_runbook_rows(_sample_runbook(swapped))) != []
 
     no_late = base.replace("，亦不得晚于提交。", "。")
@@ -320,6 +325,6 @@ def test_runbook_negative_examples():
 
 @skip_no_pair
 def test_runbook_token_registry_matches_tool(tool):
-    """执行单词表与检索工具词表锁定一致。"""
+    """The runbook word registry is locked in agreement with the scan tool's word registry."""
     text = RUNBOOK.read_text(encoding="utf-8")
     assert check_token_registry(text, tool.PLACEHOLDER_TOKENS) == []

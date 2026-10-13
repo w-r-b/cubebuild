@@ -1,26 +1,37 @@
-"""md 表体 ↔ CSV 字段级门禁（映射为现编号）。
+"""Field-level gate between the md table bodies and the CSV (mapped to the current numbering).
 
-判据：手稿表体（8 张主表 + 附录 A–D）与 paper/tables/*.csv 按映射列逐行逐字段比对；
-差异必须全部落在「论文面措辞适配」白名单列内，白名单外的任何差异即失败。行数校验、
-手稿列 ⊆ CSV 列（CSV 可多「出处」等底账列）。手稿为人工对齐 CSV 的表体，若无门禁，
-manifest 漂移致 CSV 重算后 md 不随动也不报警（已知遗留②）。
+Criterion: compare the manuscript table bodies (8 main tables + Appendices A–D) with
+paper/tables/*.csv row by row and field by field along the mapped columns; all differences
+must fall within the "paper-facing wording adaptation" whitelist columns, and any difference
+outside the whitelist is a failure. Row-count check, and manuscript columns ⊆ CSV columns
+(the CSV may carry extra ledger columns such as "source"). The manuscript is a table body
+manually aligned to the CSV; without the gate, a manifest drift that triggers a CSV recompute
+would leave the md unmoved and unflagged (known leftover ②).
 
-来源：比对器逻辑承自旧编号映射专项工具（
-该专项工具已退役删除）；本门禁更新至现编号——表 2 = 层—档位矩阵
-（转表）、表 2–7 顺延为表 3–8、新增附录 A/C/D——并纳入 pytest。归一函数处理显示差异
-（U+2212 负号、×10⁻⁵ 上下标、km² 上标、单位串尾标点）。已知论文面差异按处置分两类
-（实测重定，豁免面收窄）：
-- 附录 A/D「单位」与附录 D「说明」：形态机械，改**凝缩式规则校验**（`condense_unit`／
-  `omit_optional`）——列不再整列豁免，仅放行规则覆盖的形态（单位：手稿＝CSV 或 CSV 串
-  的「，…」注记段略去并闭合括号；说明：手稿＝CSV 或整格省略），第三值一律命中；
-- 其余宽口径措辞列（表 1／表 8／附录 B 的豁免列）：自由措辞差异不可机械判（如「数据集」
-  列 24/24 行差异），维持整列豁免（`adapted`）。
+Origin: the comparator logic is inherited from the old-numbering mapping tool (that tool has
+been retired and deleted); this gate has been updated to the current numbering — Table 2 =
+layer–tier matrix (re-tabled), Tables 2–7 shifted to Tables 3–8, Appendices A/C/D added — and
+is brought under pytest. The normalisation functions handle display differences (U+2212 minus
+sign, ×10⁻⁵ superscripts/subscripts, km² superscript, trailing punctuation in unit strings).
+The known paper-facing differences fall into two classes by disposition (re-determined by
+measurement, with a narrowed exemption surface):
+- Appendix A/D "Unit" and Appendix D "Notes": the form is mechanical, so they are switched to
+  a **condensed-form rule check** (`condense_unit` / `omit_optional`) — the column is no
+  longer exempted wholesale, and only the forms covered by the rule are accepted (Unit:
+  manuscript = CSV, or the "，…" annotation segment of the CSV string is dropped with the
+  parenthesis closed; Notes: manuscript = CSV, or the whole cell is omitted), while any third
+  value is always flagged;
+- the remaining broad-wording columns (the exempt columns of Table 1 / Table 8 / Appendix B):
+  free wording differences cannot be judged mechanically (e.g. all 24/24 rows differ in the
+  "Dataset" column), so they remain exempted wholesale (`adapted`).
 
-**英文稿变体**：同一接缝的第二个比对面——
-英文稿表体 ↔ 同一套中文底账 CSV，列级口径三类 strict/numeric/adapted（定义见文末
-「表格门禁英文变体」节），附规则化映射（主档逐档、关联层公共前缀省略、数据 DOI 注记归并）。
+**English manuscript variant**: the second comparison surface at the same seam — the English
+manuscript table bodies ↔ the same set of Chinese ledger CSVs, with column criteria in three
+classes strict/numeric/adapted (definitions in the "table gate English variant" section at the
+end), plus regularised mappings (per-tier home tier, related-layer common-prefix omission,
+data-DOI annotation merging).
 
-运行：pytest tests/test_tables_gate.py（轻量，只读 md 与 CSV）。
+Run: pytest tests/test_tables_gate.py (lightweight; reads only md and CSV).
 """
 from __future__ import annotations
 
@@ -39,7 +50,7 @@ sys.path.insert(0, str(REPO / "paper" / "scripts"))
 
 try:
     import nsd_tables as nt  # noqa: E402
-except ImportError:  # 公开仓不含论文侧脚本与产物：缺件即跳过（沿用缺件跳过惯例）
+except ImportError:
     nt = None
 
 pytestmark = pytest.mark.skipif(
@@ -53,7 +64,7 @@ _SUP = {"⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "�
 
 
 def norm_cell(v: str) -> str:
-    """显示差异归一到可比形：负号、上标数字、×10ⁿ 科学计数。"""
+    """Normalise display differences to a comparable form: minus sign, superscript digits, ×10ⁿ scientific notation."""
     v = v.replace("−", "-").replace("–", "-")
     v = "".join(_SUP.get(ch, ch) for ch in v)
     return v.replace("×10", "e").replace("e-0", "e-").replace("e+0", "e")
@@ -62,7 +73,7 @@ def norm_cell(v: str) -> str:
 def cell_equal(mv: str, cv: str) -> bool:
     if norm_cell(mv) == norm_cell(cv):
         return True
-    try:  # 数值同值不同写法（如 0.01 vs 1e-02 类）按数值比
+    try:
         a, b = float(norm_cell(mv)), float(norm_cell(cv))
     except ValueError:
         return False
@@ -70,7 +81,7 @@ def cell_equal(mv: str, cv: str) -> bool:
 
 
 def md_table(lines: list[str], after_pattern: str) -> tuple[list[str], list[list[str]]]:
-    """返回 after_pattern 之后第一个 markdown 表的 (header, rows)。"""
+    """Return the (header, rows) of the first markdown table after after_pattern."""
     i = next(k for k, l in enumerate(lines) if re.search(after_pattern, l))
     block, started = [], False
     for l in lines[i + 1:]:
@@ -80,7 +91,7 @@ def md_table(lines: list[str], after_pattern: str) -> tuple[list[str], list[list
         elif started:
             break
     cells = [[c.strip() for c in b.strip().strip("|").split("|")] for b in block]
-    header, rows = cells[0], cells[2:]  # cells[1] 为分隔行
+    header, rows = cells[0], cells[2:]
     assert all(len(r) == len(header) for r in rows), after_pattern
     return header, rows
 
@@ -92,7 +103,7 @@ def load_csv(name: str) -> tuple[list[str], list[list[str]]]:
 
 
 def abbrev(cell_md: str, cell_csv: str) -> str:
-    """手稿 pb2002 关联层用「、_」省略公共前缀；比对时把 CSV 侧同样省略。"""
+    """The manuscript's pb2002 related-layers column uses "、_" to omit the common prefix; on comparison, abbreviate the CSV side the same way."""
     if "、_" not in cell_md:
         return cell_csv
     ids = cell_csv.split("、")
@@ -103,7 +114,7 @@ def abbrev(cell_md: str, cell_csv: str) -> str:
 
 
 def norm_data_doi(cell: str) -> str:
-    """registry 数据 DOI 为「（…）」注记形时手稿显示「—（凝缩注记）」——只比前缀。"""
+    """When the registry data DOI has the annotation form "（…）", the manuscript shows "—(condensed annotation)"; only the prefix is compared."""
     return "—" if cell.startswith("（") else cell
 
 
@@ -112,9 +123,9 @@ def md_startswith_dash(v: str) -> str:
 
 
 def condense_unit(mv: str, cv: str) -> str:
-    """附录 A/D「单位」凝缩式规则：手稿把 category 单位串的「，…」注记段略去并闭合括号。
+    """Condensed-form rule for the "Unit" column in Appendix A/D: the manuscript drops the "，…" annotation segment of the category unit string and closes the parenthesis.
 
-    仅当手稿恰为该凝缩形时放行（返回凝缩串）；第三值一律照原串比对（命中）。
+    Only when the manuscript is exactly in this condensed form is it accepted (returning the condensed string); any third value is compared against the original string as-is (and flagged).
     """
     head, sep, _ = cv.partition("，")
     condensed = head + "）" if sep and head.count("（") > head.count("）") else head
@@ -122,15 +133,15 @@ def condense_unit(mv: str, cv: str) -> str:
 
 
 def omit_optional(mv: str, cv: str) -> str:
-    """附录 D「说明」省略式规则：手稿按需省略底账注记（整格留空）。
+    """Omission-form rule for the "Notes" column in Appendix D: the manuscript omits the ledger annotation as needed (leaving the whole cell empty).
 
-    仅当手稿为空时放行；非空的第三值一律照原串比对（命中）。
+    Only when the manuscript cell is empty is it accepted; any non-empty third value is compared against the original string as-is (and flagged).
     """
     return "" if mv == "" else cv
 
 
 class TableSpec(NamedTuple):
-    """一张表的比对规格：手稿定位（名＋正则）、对应 CSV、列映射、论文面措辞适配列。"""
+    """Comparison spec for one table: manuscript anchor (label + regex), corresponding CSV, column mapping, and paper-facing wording adaptation columns."""
 
     label: str
     anchor: str
@@ -201,7 +212,7 @@ SPECS = [
 
 
 def compare(md_text: str) -> list[str]:
-    """逐表比对，返回白名单外的差异清单（空 = PASS）。"""
+    """Compare table by table; return the list of differences outside the whitelist (empty = PASS)."""
     lines = md_text.split("\n")
     findings: list[str] = []
     for spec in SPECS:
@@ -223,7 +234,7 @@ def compare(md_text: str) -> list[str]:
                 mv, cv = mrow[mi[mcol]], crow[ci[ccol]]
                 if fn:
                     cv = fn(mv, cv)
-                if mcol == "数据 DOI":  # 附录 B 特例：registry「（…」→手稿「—（…」
+                if mcol == "数据 DOI":
                     cv, mv = norm_data_doi(cv), md_startswith_dash(mv)
                 if not cell_equal(mv, cv):
                     findings.append(f"{tab}: 行{r}「{mcol}」手稿={mv!r} CSV={cv!r}")
@@ -231,7 +242,7 @@ def compare(md_text: str) -> list[str]:
 
 
 def kernel_label_findings(labels: dict[str, str]) -> list[str]:
-    """附录 A 核列 vs 注册表标签逐层比对（findings 空 = PASS）。"""
+    """Compare the Appendix A kernel column against the registry labels layer by layer (empty findings = PASS)."""
     manifest = json.loads(
         (REPO / "products" / "cube-v1.0.zarr" / "cube_manifest.json").read_text(encoding="utf-8"))
     ch, rows = load_csv("appendix-a-layer-registry")
@@ -255,10 +266,9 @@ def _kernel_labels() -> dict[str, str]:
 
 
 def test_kernel_labels_match_registry():
-    """核列标签与注册表同源（闭合 common.KERNEL_LABEL → 附录 A CSV 段）。
+    """The kernel-column labels share a single source with the registry (closing the common.KERNEL_LABEL → Appendix A CSV segment chain).
 
-    标签改一处（common.py）而忘重跑生成器时，CSV 会停在旧文本；本条与
-    test_current_tables_clean（CSV↔md）合起来完成 common.py → md 的传递链。
+    If a label is changed in one place (common.py) but the generator is not rerun, the CSV stays at the old text; this test together with test_current_tables_clean (CSV↔md) completes the common.py → md propagation chain.
     """
     findings = kernel_label_findings(_kernel_labels())
     assert findings == [], (
@@ -267,7 +277,7 @@ def test_kernel_labels_match_registry():
 
 
 def test_kernel_label_drift_detected():
-    """真实基底变异负例：none 标签回退为旧文本 → 命中（提示重跑生成器）。"""
+    """Real-base mutation negative case: reverting the none label to the old text → flagged (reminding to rerun the generator)."""
     labels = dict(_kernel_labels())
     labels["none"] = "无（不跨档）"
     findings = kernel_label_findings(labels)
@@ -275,13 +285,13 @@ def test_kernel_label_drift_detected():
 
 
 def test_current_tables_clean():
-    """当前手稿全部表体与 CSV 一致（白名单外零差异）。"""
+    """All current manuscript table bodies match the CSV (zero differences outside the whitelist)."""
     findings = compare(MD.read_text(encoding="utf-8"))
     assert findings == [], "md↔CSV 白名单外差异：\n" + "\n".join(findings)
 
 
 def test_mutated_table_number_detected():
-    """真实基底变异负例：改表 2 像元数一格 → 门禁命中。"""
+    """Real-base mutation negative case: change one cell of the Table 2 pixel count → the gate flags it."""
     text = MD.read_text(encoding="utf-8")
     assert "| 64,800 |" in text
     mutated = text.replace("| 64,800 |", "| 64,801 |", 1)
@@ -290,7 +300,7 @@ def test_mutated_table_number_detected():
 
 
 def test_mutated_kernel_label_detected():
-    """真实基底变异负例：改附录 A 一行重采样核 → 门禁命中。"""
+    """Real-base mutation negative case: change the resampling kernel in one Appendix A row → the gate flags it."""
     text = MD.read_text(encoding="utf-8")
     m = re.search(r"^\| 4 \| seismology__gladm35_vsv \|.*\|$", text, flags=re.M)
     assert m, "附录 A 第 4 行定位失败"
@@ -300,7 +310,7 @@ def test_mutated_kernel_label_detected():
 
 
 def test_condensed_unit_third_value_detected():
-    """真实基底变异负例：附录 A 行 39「单位」改第三值（非凝缩形）→ 门禁命中。"""
+    """Real-base mutation negative case: change the "Unit" in Appendix A row 39 to a third value (non-condensed form) → the gate flags it."""
     text = MD.read_text(encoding="utf-8")
     m = re.search(r"^\| 39 \| lithosphere__crustal_age_class \|.*\|$", text, flags=re.M)
     assert m, "附录 A 行 39 定位失败"
@@ -311,7 +321,7 @@ def test_condensed_unit_third_value_detected():
 
 
 def test_omitted_notes_third_value_detected():
-    """真实基底变异负例：附录 D pixel_area 行「说明」填第三值（非省略、非原注记）→ 命中。"""
+    """Real-base mutation negative case: fill the "Notes" of the Appendix D pixel_area row with a third value (neither omitted nor the original annotation) → flagged."""
     text = MD.read_text(encoding="utf-8")
     m = re.search(r"^\| derived__pixel_area \| 古地形与派生层 \|.*\|$", text, flags=re.M)
     assert m, "附录 D pixel_area 行定位失败"
@@ -324,7 +334,7 @@ def test_omitted_notes_third_value_detected():
 
 
 def test_exclusion_totals_hold():
-    """表 8 数字互核：CSV 层明细合计 = 手稿题注「22 层 + 6 内部侧车」。"""
+    """Table 8 numeric cross-check: CSV layer detail total = manuscript caption "22 layers + 6 internal sidecars"."""
     ch, cr = load_csv("table8-internal-exclusions")
     tot_l = sum(int(r[ch.index("层数")]) for r in cr)
     tot_s = sum(int(r[ch.index("侧车数")]) for r in cr)
@@ -332,21 +342,8 @@ def test_exclusion_totals_hold():
 
 
 # ============================================================================
-# 英文稿表体门禁（表格门禁英文变体）
 # ============================================================================
-# 判据：英文稿（paper/manuscript/SEDC-manuscript-en.md）表体 ↔ 中文底账 CSV。
-# 列级口径三类（「自然语言列按映射/豁免处理；数值与结构列与底账严格相等」口径的
-# 机械化展开）：
-#   strict  —— 结构/数值列（层 id、数值、可见性、档位记号、dtype、DOI、计数）：显示差异
-#              归一（负号/上标/科学计数）＋中英标点转写（、，；：→ 半角）后严格相等；
-#   numeric —— 含自然语言注记的数值列（如「层 5（全公开）」/「5 layers (all public)」）：
-#              数字 token **多重集**相等（缺失/新增/替换任一即命中；不比较顺序，因中英句
-#              序合法不同，如「25 层登记、1° 全集档 25 层」↔「25 layers registered, 25
 #              layers in the 1° master tier」）；
-#   adapted —— 自然语言列（域组名、单位说明、说明列、措辞列）：整列豁免，改由译英保真
-#              检查器（数字/引用/层 id/DOI 集合级 diff）与中文门禁两面兜底。
-# 特例规则：附录 A/C/D「主档」的「逐档」↔「per tier」；表 4「关联层」沿用中文门禁的
-# 公共前缀省略（英文记形 "、_"→", _"）；附录 B「数据 DOI」沿用「（…」→「—」注记归并。
 
 EN_MD = REPO / "paper" / "manuscript" / "SEDC-manuscript-en.md"
 
@@ -355,12 +352,12 @@ _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?(?:e-?\d+)?")
 
 
 def norm_en(cell: str) -> str:
-    """英文稿显示归一：中英标点转写 + 既有显示归一（负号/上标/科学计数）。"""
+    """English-manuscript display normalisation: Chinese-English punctuation transliteration + the existing display normalisation (minus sign / superscripts / scientific notation)."""
     return re.sub(r"\s+", " ", norm_cell(cell.translate(_ZH_PUNCT))).strip()
 
 
 def num_tokens(cell: str) -> list[str]:
-    """数字 token 多重集（去千分位；科学计数与上标先经 norm_cell 归一）。"""
+    """Multiset of numeric tokens (thousands separators removed; scientific notation and superscripts first normalised via norm_cell)."""
     return sorted(t.replace(",", "") for t in _NUM_RE.findall(norm_cell(cell)))
 
 
@@ -375,17 +372,17 @@ def strict_en_equal(mv: str, cv: str) -> bool:
 
 
 def norm_home_tier(cv: str) -> str:
-    """主档列：底账「逐档」在英文稿记作「per tier」（按档解析计算，无单一主档）。"""
+    """Home-tier column: the ledger's tier-range marker is written as "per tier" in the English manuscript (resolved per tier, with no single home tier)."""
     return "per tier" if cv == "逐档" else cv
 
 
 def norm_doi_cell(cv: str) -> str:
-    """DOI 列的非 DOI 格：CRUST1.0 摘要引用「EGU2013-2658（摘要）」的中文注记译作 "(abstract)"。"""
+    """Non-DOI cell of the DOI column: the Chinese parenthetical annotation on the CRUST1.0 abstract citation is translated as "(abstract)"."""
     return cv.replace("（摘要）", " (abstract)")
 
 
 def abbrev_en(mv: str, cv: str) -> str:
-    """表 4 关联层：英文稿记形 "、_"→", _" 省略公共前缀；比对时把 CSV 侧同样省略。"""
+    """Table 4 related-layers: the English manuscript writes "、_"→", _" to omit the common prefix; on comparison, abbreviate the CSV side the same way."""
     if ", _" not in mv:
         return cv.replace("、", ", ")
     ids = cv.split("、")
@@ -468,7 +465,7 @@ EN_SPECS = [
 
 
 def compare_en(md_text: str) -> list[str]:
-    """英文稿逐表比对，返回口径外差异清单（空 = PASS）。"""
+    """Compare the English manuscript table by table; return the list of differences outside the criteria (empty = PASS)."""
     lines = md_text.split("\n")
     findings: list[str] = []
     for spec in EN_SPECS:
@@ -494,7 +491,7 @@ def compare_en(md_text: str) -> list[str]:
                     cv = norm_home_tier(cv)
                 elif col.kind == "abbrev":
                     cv = abbrev_en(mv, cv)
-                elif col.csv == "数据 DOI":  # 附录 B 特例：registry「（…」→手稿「—（…」
+                elif col.csv == "数据 DOI":
                     cv, mv = norm_data_doi(cv), md_startswith_dash(mv)
                 if col.kind == "numeric":
                     if num_tokens(mv) != num_tokens(cv):
@@ -506,16 +503,15 @@ def compare_en(md_text: str) -> list[str]:
     return findings
 
 
-# ---------- 英文稿门禁：现稿零差异 + 变异负例 ----------
 
 def test_en_current_tables_clean():
-    """英文稿全部表体与底账 CSV 在口径内一致（adapted 列与规则化映射之外零差异）。"""
+    """All English manuscript table bodies agree with the ledger CSV within the criteria (zero differences beyond the adapted columns and the regularised mappings)."""
     findings = compare_en(EN_MD.read_text(encoding="utf-8"))
     assert findings == [], "英文稿 md↔CSV 口径外差异：\n" + "\n".join(findings)
 
 
 def test_en_mutated_tier_number_detected():
-    """英文基底变异负例：表 2 像元数一格（64,800→64,801）→ 门禁命中。"""
+    """English-base mutation negative case: one cell of the Table 2 pixel count (64,800→64,801) → the gate flags it."""
     text = EN_MD.read_text(encoding="utf-8")
     assert "| Pixels | 64,800 |" in text
     findings = compare_en(text.replace("| Pixels | 64,800 |", "| Pixels | 64,801 |", 1))
@@ -523,7 +519,7 @@ def test_en_mutated_tier_number_detected():
 
 
 def test_en_mutated_layer_id_detected():
-    """英文基底变异负例：附录 A 层 id 大小写篡改（vsv→VSV）→ 命中（层 id 列 strict）。"""
+    """English-base mutation negative case: case tampering of an Appendix A layer id (vsv→VSV) → flagged (the layer id column is strict)."""
     text = EN_MD.read_text(encoding="utf-8")
     assert "seismology__gladm35_vsv" in text
     findings = compare_en(text.replace("seismology__gladm35_vsv", "seismology__gladm35_VSV", 1))
@@ -531,7 +527,7 @@ def test_en_mutated_layer_id_detected():
 
 
 def test_en_mutated_visibility_detected():
-    """英文基底变异负例：附录 A 可见性 public→internal → 命中（可见性列 strict）。"""
+    """English-base mutation negative case: Appendix A visibility public→internal → flagged (the visibility column is strict)."""
     text = EN_MD.read_text(encoding="utf-8")
     mutated = re.sub(
         r"^\| 1 \| topography__bedrock_elevation \| [^|]*\| public \|",
@@ -543,7 +539,7 @@ def test_en_mutated_visibility_detected():
 
 
 def test_en_missing_number_in_numeric_col_detected():
-    """英文基底变异负例：表 3 数值列丢一个数字（13,695）→ 命中（numeric 多重集判据）。"""
+    """English-base mutation negative case: the Table 3 value column drops one number (13,695) → flagged (numeric multiset criterion)."""
     text = EN_MD.read_text(encoding="utf-8")
     assert "| Volume | Full store | 12.79 GB (13,695 files) |" in text
     mutated = text.replace("| Volume | Full store | 12.79 GB (13,695 files) |",
@@ -553,7 +549,7 @@ def test_en_missing_number_in_numeric_col_detected():
 
 
 def test_en_mutated_doi_detected():
-    """英文基底变异负例：附录 B 数据 DOI 末位篡改（SEMUCB-WM1 行，仅附录 B 出现）→ 命中。"""
+    """English-base mutation negative case: the last digit of the Appendix B data DOI is tampered with (SEMUCB-WM1 row, which appears only in Appendix B) → flagged."""
     text = EN_MD.read_text(encoding="utf-8")
     assert "10.17611/dp/emc.2023.semucbwm1.1" in text
     findings = compare_en(text.replace("10.17611/dp/emc.2023.semucbwm1.1",
@@ -562,7 +558,7 @@ def test_en_mutated_doi_detected():
 
 
 def test_en_home_tier_mapping_and_mutation():
-    """附录 A「逐档→per tier」为登记在案的映射；改回档位记号即命中（第三值不放行）。"""
+    """The Appendix A mapping from the ledger's tier-range marker to "per tier" is on record; reverting to a tier marker is flagged (a third value is not accepted)."""
     text = EN_MD.read_text(encoding="utf-8")
     assert "| per tier | float32 | km² | Analytical formula |" in text
     mutated = text.replace("| per tier | float32 | km² | Analytical formula |",
@@ -573,7 +569,7 @@ def test_en_home_tier_mapping_and_mutation():
 
 
 def test_en_adapted_column_exempt_by_design():
-    """adapted 列按 spec 口径整列豁免：改表 1「Dataset」列措辞不产生发现（豁免面显式登记）。"""
+    """adapted columns are exempt for the whole column under the spec criteria: changing the wording of the Table 1 "Dataset" column produces no finding (the exemption surface is explicitly on record)."""
     text = EN_MD.read_text(encoding="utf-8")
     mutated = text.replace(
         "| 1 | ETOPO 2022 Bedrock (NOAA National Centers for Environmental Information, 2022) |",
@@ -582,17 +578,12 @@ def test_en_adapted_column_exempt_by_design():
     assert compare_en(mutated) == []
 
 # ============================================================================
-# NSD 稿表体门禁（表格门禁 NSD 变体）
 # ============================================================================
-# 判据：NSD 稿表体 ↔ 底账 CSV（列级口径沿用英文变体：strict/numeric/adapted 与
-# 规则化映射）；表号↔CSV 键的映射由 `nsd_tables.TABLE_REGISTRY` 登记守护——
-# 锚点、CSV 与表号三者同源，表号漂移即命中；另核「首现序＝数字序」（判据②）。
-# 注：`nsd_tables` 导入与缺件跳过守卫在模块顶部（守卫作用于整模块）。
 NSD_MD = REPO / "paper" / "manuscript" / "SEDC-manuscript-nsd-en.md"
 
 
 def _nsd_specs() -> list[EnSpec]:
-    """按登记表号把英文变体的列规格重锚到 NSD 稿（表体内容与英文稿逐字一致）。"""
+    """Re-anchor the English-variant column specs to the NSD manuscript by registered table number (the table body content is verbatim identical to the English manuscript)."""
     base = {spec.csv_name: spec for spec in EN_SPECS}
     specs: list[EnSpec] = []
     for entry in sorted(nt.TABLE_REGISTRY, key=lambda e: e.number):
@@ -603,10 +594,9 @@ def _nsd_specs() -> list[EnSpec]:
 
 
 def compare_nsd(md_text: str) -> list[str]:
-    """NSD 稿逐表比对（列口径与英文变体同一实现，仅锚点/表号按登记映射）。
+    """Compare the NSD manuscript table by table (the column criteria share the same implementation as the English variant; only the anchors / table numbers follow the registered mapping).
 
-    编号引用上标（`^N^`）是结构产物，先剥离再取 token——否则胞内上标编号会被计入
-    数字多重集（实测假阳性：底账 `Sect. 2.5` ↔ NSD `…subsection)^30^`）。
+    Numbered-citation superscripts (`^N^`) are a structural artefact; strip them before extracting tokens — otherwise in-cell superscript numbers get counted into the numeric multiset (measured false positive: ledger `Sect. 2.5` ↔ NSD `…subsection)^30^`).
     """
     md_text = re.sub(r"\^[\d,]+\^", "", md_text)
     lines = md_text.split("\n")
@@ -645,16 +635,14 @@ def compare_nsd(md_text: str) -> list[str]:
     return findings
 
 
-# 结构差异白名单（逐格登记）：表胞内的节号指针改节名 / author-date 引用改上标编号，
-# 使底账侧的节号与年份 token 从胞内消失。多余登记与陈旧登记均判失败（见下测试）。
 NSD_STRUCTURAL_CELL_DIFFS: set[tuple[str, int, str]] = {
     ("表 6", 14, "Result"),                        # Sect. 4.4 → the Physical cross-check subsection
     ("表 7", 3, "Mechanism / measured signature"),  # Sect. 2.5 → the Special data channels subsection
-    ("表 7", 5, "Mechanism / measured signature"),  # 同上
+    ("表 7", 5, "Mechanism / measured signature"),
     ("表 8", 5, "Hard constraint"),                 # Sect. 2.5 → the Special data channels subsection
-    ("表 8", 6, "Operating rule"),                  # (Meyer and Pebesma, 2021) → 上标编号
-    ("表 7", 5, "Impact and user action"),          # (表 4) → (Table 3)：重编号后与底账「表 4」token 不等
-    ("表 7", 7, "Mechanism / measured signature"),  # 润色：去破折号并紧凑化，胞内 6′ 出现次数减一（数字 token 集变）
+    ("表 8", 6, "Operating rule"),
+    ("表 7", 5, "Impact and user action"),
+    ("表 7", 7, "Mechanism / measured signature"),
 }
 
 
@@ -664,7 +652,7 @@ def _registered_nsd(finding: str) -> bool:
 
 
 def test_nsd_tables_clean():
-    """NSD 稿全部主表与底账 CSV 在口径内一致（白名单逐格登记之外零差异）。"""
+    """All NSD manuscript main tables agree with the ledger CSV within the criteria (zero differences beyond the per-cell whitelist entries)."""
     findings = compare_nsd(NSD_MD.read_text(encoding="utf-8"))
     unregistered = [f for f in findings if not _registered_nsd(f)]
     assert unregistered == [], "NSD 稿 md↔CSV 白名单外差异：\n" + "\n".join(unregistered)
@@ -674,7 +662,7 @@ def test_nsd_tables_clean():
 
 
 def test_nsd_table_numbering_consistent():
-    """表号↔CSV 键映射 + 首现序＝数字序（nsd_tables 判据①②）零发现。"""
+    """Table-number ↔ CSV key mapping + first-mention order = numeric order (nsd_tables criteria ①②): zero findings."""
     findings = nt.numbering_findings(NSD_MD.read_text(encoding="utf-8"))
     assert findings == [], findings
     assert nt.mention_order(NSD_MD.read_text(encoding="utf-8")) == \
@@ -682,7 +670,7 @@ def test_nsd_table_numbering_consistent():
 
 
 def test_nsd_mutated_cell_detected():
-    """负例：NSD 稿表体一格（64,800→64,801）→ 命中（表体仍与底账闭链）。"""
+    """Negative case: one cell of the NSD manuscript table body (64,800→64,801) → flagged (the table body still forms a closed chain with the ledger)."""
     text = NSD_MD.read_text(encoding="utf-8")
     assert "| Pixels | 64,800 |" in text
     findings = compare_nsd(text.replace("| Pixels | 64,800 |", "| Pixels | 64,801 |", 1))
@@ -690,14 +678,14 @@ def test_nsd_mutated_cell_detected():
 
 
 def test_nsd_numbering_drift_detected():
-    """负例：把某处表号提及改错（映射错位/首现序漂移）→ 命中。"""
+    """Negative case: corrupt one table-number mention (mapping misalignment / first-mention-order drift) → flagged."""
     text = NSD_MD.read_text(encoding="utf-8")
     findings = nt.numbering_findings(text.replace("in Table 5.", "in Table 6.", 1))
     assert any("首现序" in f or "题注表号集合" in f or "孤儿" in f for f in findings), findings
 
 
 def test_supplementary_tables_match_baseline():
-    """Supplementary 表产物与 ESSD 英文稿附录表体逐字段一致（载体迁移零手工转录）。"""
+    """The Supplementary table products match the ESSD English-manuscript appendix table bodies field by field (carrier migration with zero manual transcription)."""
     src = (REPO / "paper" / "manuscript" / "SEDC-manuscript-en.md").read_text(encoding="utf-8")
     lines = src.split("\n")
     anchors = {
@@ -720,8 +708,9 @@ def test_supplementary_tables_match_baseline():
 
 
 def test_renumber_single_pass_keeps_caption_markers():
-    """renumber 机械改写回归题注与正文提及
-    按首现序**一次**映射——粗体标记 `**` 不得被吃、编号不得二次映射；且幂等。"""
+    """renumber mechanically rewrites the regression captions and body mentions, mapping **once**
+    by first-mention order — the bold markers `**` must not be consumed and numbers must not be
+    mapped twice; it is also idempotent."""
     text = ("**Table 2.** second caption.\n\n**Table 1.** first caption.\n\n"
             "See Table 3, Table 4, Table 5, Table 6, Table 7 and Table 8.\n")
     out = nt.renumber(text)
@@ -729,4 +718,4 @@ def test_renumber_single_pass_keeps_caption_markers():
     assert "**Table 2.** first caption." in out
     assert "See Table 3, Table 4, Table 5, Table 6, Table 7 and Table 8." in out
     assert nt.caption_numbers(out) == [1, 2]
-    assert nt.renumber(out) == out  # 幂等（首现序已＝数字序）
+    assert nt.renumber(out) == out

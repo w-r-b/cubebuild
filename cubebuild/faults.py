@@ -1,41 +1,57 @@
-"""断层双通道：GEM 活动断层 slip_type 类别层 + 球面大圆距离场。
+"""Fault dual channel: GEM active-fault slip_type class layer + spherical great-circle distance field.
 
-源（磁盘实证，harmonized 主版本）：
-- geopackage/gem_active_faults_harmonized.gpkg：13696 条 LineString（无
-  MultiLineString），EPSG:4326，154994 顶点（平均 11.3 点/条）→ 有效段
-  140955（零长段 343 剔除），总长 665632 km（球面，authalic R）；环边
-  |Δlon|>180°（跨日期线）实证 0 条；slip_type 词汇表 23 类 + NaN 319 条
-  （不参与类别栅格化，距离场仍计入）。
-- 非 harmonized 版 gem_active_faults.gpkg（16195 行，CRS 未定义）为原始
-  编汇版，不入立方。
+Source (disk-verified, harmonized main version):
+- geopackage/gem_active_faults_harmonized.gpkg: 13696 LineStrings (no
+  MultiLineString), EPSG:4326, 154994 vertices (avg 11.3 points/line) → 140955
+  valid segments (343 zero-length segments dropped), total length 665632 km
+  (spherical, authalic R); ring edges with |Δlon|>180° (crossing the dateline)
+  measured 0; slip_type vocabulary 23 classes + NaN for 319 records (not
+  rasterized as classes; still counted in the distance field).
+- the non-harmonized gem_active_faults.gpkg (16195 rows, CRS undefined) is the
+  original compilation and is not ingested into the cube.
 
-距离场引擎（逐档从矢量源按球面大圆距离精确重算，与降采样核无关）：
-- 每档像元值 = 该档像元中心到最近断层线要素的球面大圆距离（km，IUGG
-  authalic R——与像元面积层同球）；不引用任何粗档数值，无降采样参与。
-- 全网格对全部 ~1.4×10⁵ 段直接求 min 不可行（30″ 档 9.3×10⁸ 像元），
-  采用层级环带候选剪枝（数学上保证不漏候选）：
+Distance-field engine (recomputed exactly per tier from the vector source by
+spherical great-circle distance, independent of the downsampling kernel):
+- each tier's pixel value = spherical great-circle distance (km, IUGG authalic
+  R — same sphere as the pixel-area layer) from that tier's pixel center to the
+  nearest fault-line feature; it references no coarse-tier values and involves
+  no downsampling.
+- computing min over all ~1.4×10⁵ segments directly for the full grid is not
+  feasible (30″ tier has 9.3×10⁸ pixels), so a hierarchical annulus candidate
+  pruning is used (mathematically guaranteed not to miss candidates):
 
-  引理（候选环带）：胞 C 中心 c、半对角线 ρ（C 内任一点到 c 的球面距离
-  上界），p ∈ C 的最近段 s_p 满足
+  Lemma (candidate annulus): for a cell C with center c and half-diagonal ρ
+  (upper bound on the spherical distance from any point in C to c), the nearest
+  segment s_p for any p ∈ C satisfies
       dist(c, s_p) ∈ [d(c) − 2ρ, d(c) + 2ρ]
-  （两次三角不等式 + 距离函数 1-Lipschitz）。由此归纳：1° 档中心对全部
-  段精确求 min 并收集环带 stored(1°)；每档子胞的候选集 = 父档 stored
-  （归纳保证包含子胞像元的 argmin），对候选求 min 得该档精确值，再按
-  自身环带过滤出 stored 传递给更细档。远场环带是半径 d(c)、宽 4ρ 的薄
-  环——候选数不随档位细化膨胀，这是全网格精确计算可负担的关键。
-- 值经引理保证无损；保真报告以独立实现的航空公式（半正矢 + 初始方位角）
-  全段暴力抽样比对复核。
-- 并行：按 1° 胞分解自包含任务（每胞自算 1° 暴力 min + 环带 + 逐档
-  细化），fork 进程池；逐像元算术与任务序无关，构建确定性不受并行影响。
+  (two applications of the triangle inequality + the 1-Lipschitz property of
+  the distance function). By induction: the 1° tier center computes an exact
+  min over all segments and collects the annulus stored(1°); each tier's child
+  cell candidate set = the parent tier's stored (the induction guarantees it
+  contains the child pixel's argmin); taking the min over the candidates yields
+  that tier's exact value, then filtering by its own annulus yields stored to
+  pass to finer tiers. The far-field annulus is a thin ring of radius d(c) and
+  width 4ρ — the candidate count does not blow up as tiers are refined, which is
+  the key to making exact full-grid computation affordable.
+- values are lossless by the lemma; the fidelity report cross-checks against an
+  independently implemented aviation formula (haversine + initial bearing)
+  brute-forced over all segments by sampling.
+- parallelism: decomposed into self-contained tasks by 1° cell (each cell
+  computes the 1° brute-force min + annulus + per-tier refinement), fork process
+  pool; the per-pixel arithmetic is independent of task order, so build
+  determinism is unaffected by parallelism.
 
-类别通道（复用栅格化机制）：线要素栅格化（GDAL 线默认走线算法，
-all_touched=False，单像元宽迹线）→ 粗档 kernels.aggregate_mode 众数
-聚合（nodata=0 不参与、平票取小、≥1 有效子胞即有值）；重叠像元取较短
-断裂（局部细化优先，按「面积较小多边形」原则）；slip_type 缺失
-断裂不烧录（0 = 无断层经过）。
+Class channel (reuses the rasterization machinery): rasterize line features
+(GDAL default line algorithm for lines, all_touched=False, single-pixel-wide
+trace) → coarse tiers use kernels.aggregate_mode mode aggregation (nodata=0 not
+participating, ties take the smaller, ≥1 valid subcell means a value); for
+overlapping pixels the shorter fault wins (local refinement first, per the
+"smaller-area polygon" principle); faults with missing slip_type are not burned
+(0 = no fault passing through).
 
-许可：GEM GAF-DB 仓库 LICENSE.txt 为 CC BY-SA 4.0（SA 条款不符合
-开放许可要求），两层与侧车不纳入公开版，论文建议读者直接使用 GEM GAF-DB。
+License: the GEM GAF-DB repository LICENSE.txt is CC BY-SA 4.0 (the SA clause
+does not meet open-license requirements); the two layers and sidecar are not
+included in the public version; the paper suggests readers use GEM GAF-DB directly.
 """
 
 import json
@@ -79,8 +95,6 @@ EXPECTED_ROWS = 13696
 EXPECTED_SLIP_NAN = 319
 NODATA = 0
 
-# slip_type 词汇表（磁盘实测 23 类，字典序固定编码 1..23；0 = 无类别）。
-# NaN 319 条不占码位（不参与类别栅格化，距离场仍计入）。
 SLIP_TYPE_CODES: dict[str, int] = {
     label: i for i, label in enumerate(sorted([
         "Anticline", "Blind Thrust", "Dextral", "Dextral-Normal",
@@ -101,18 +115,18 @@ LICENSE_NOTE = (
 
 
 def category_encoding() -> dict[str, str]:
-    """类别编码表（码 → 语义），attrs/manifest/sidecar 共用唯一来源。"""
+    """Category encoding table (code → semantics); the single shared source for attrs/manifest/sidecar."""
     return {str(c): label for label, c in sorted(SLIP_TYPE_CODES.items(), key=lambda kv: kv[1])}
 
 
-# ---------------- 源读取 ----------------
 
 def load_gem_faults(src_dir: str | Path = GEM_SRC_DIR):
-    """读 harmonized gpkg → (GeoDataFrame, slip_type 码数组)。
+    """Read the harmonized gpkg → (GeoDataFrame, slip_type code array).
 
-    几何契约（磁盘实证的契约化）：13696 行、EPSG:4326、全部 LineString、
-    无空几何；slip_type 词汇 ⊆ 编码表（NaN 允许，319 条）；环边
-    |Δlon|>180° 拒绝（跨日期线使平面栅格化静默错位；实证 0 条）。
+    Geometry contract (contractualized disk evidence): 13696 rows, EPSG:4326, all
+    LineStrings, no empty geometries; slip_type vocabulary ⊆ the encoding table (NaN
+    allowed, 319 records); ring edges with |Δlon|>180° rejected (crossing the dateline
+    silently misregisters planar rasterization; measured 0 records).
     """
     import geopandas as gpd
 
@@ -156,10 +170,9 @@ def load_gem_faults(src_dir: str | Path = GEM_SRC_DIR):
     return gdf, codes
 
 
-# ---------------- 球面几何：单位向量与段距离核 ----------------
 
 def _unit_vec(lat_deg, lon_deg) -> np.ndarray:
-    """(lat, lon) 度 → 3D 单位向量（..., 3）。日期线/极区无特例。"""
+    """(lat, lon) degrees → 3D unit vector (..., 3). No special cases at the dateline/poles."""
     phi = np.deg2rad(np.asarray(lat_deg, dtype=np.float64))
     lam = np.deg2rad(np.asarray(lon_deg, dtype=np.float64))
     cphi = np.cos(phi)
@@ -167,15 +180,16 @@ def _unit_vec(lat_deg, lon_deg) -> np.ndarray:
 
 
 def segment_table(geoms):
-    """断层线要素 → 段表（引擎与保真共用唯一来源）。
+    """Fault line features → segment table (the single shared source for the engine and fidelity).
 
-    相邻顶点成段；零长段（连续重复顶点）剔除并计数。返回
-    (A, B, NV, sinAB, cosAB, latlon)：
-    - A/B (n,3) 段端点单位向量；NV = A×B（未归一化，模 = sin δ_AB）；
-    - sinAB/cosAB (n,) 段角正弦/余弦；
-    - latlon (4,n) 端点原坐标（度，独立航空公式核对路径用）。
+    Adjacent vertices form segments; zero-length segments (consecutive repeated
+    vertices) are dropped and counted. Returns (A, B, NV, sinAB, cosAB, latlon):
+    - A/B (n,3) segment-endpoint unit vectors; NV = A×B (unnormalized, magnitude = sin δ_AB);
+    - sinAB/cosAB (n,) segment-angle sine/cosine;
+    - latlon (4,n) endpoint original coordinates (degrees, for the independent aviation-formula cross-check path).
 
-    契约：段角 < 90°（cosAB > 0）——超长段意味着源形态异常，读取期拒绝。
+    Contract: segment angle < 90° (cosAB > 0) — an overlong segment implies an
+    anomalous source geometry and is rejected at read time.
     """
     va_list, vb_list = [], []
     n_dropped = 0
@@ -208,13 +222,15 @@ def segment_table(geoms):
 
 
 def _point_seg_dists(p: np.ndarray, segs) -> np.ndarray:
-    """点集 → 各段球面大圆距离 (m, n) km（引擎唯一距离核，纯函数）。
+    """Point set → spherical great-circle distance (m, n) km to each segment (the engine's sole distance kernel, a pure function).
 
-    3D 向量路径：sin_xt = p·(A×B)/|A×B|（叉积弦）；
-    垂足在段内 ⟺ (p·A) ≥ cosAB·cos_xt 且 (p·B) ≥ cosAB·cos_xt
-    （沿迹角 α ≤ δ_AB ⟺ cos α ≥ cos δ_AB 的余弦单调性变换）。
-    垂足在段内 → R·|asin(sin_xt)|；否则 → R·arccos(max(p·A, p·B))
-    （较近端点）。反侧远场（含对跖）由端点分支正确兜底。
+    3D-vector path: sin_xt = p·(A×B)/|A×B| (cross-product chord);
+    the foot of the perpendicular lies within the segment ⟺ (p·A) ≥ cosAB·cos_xt and
+    (p·B) ≥ cosAB·cos_xt (via the cosine-monotonicity transform of along-track angle
+    α ≤ δ_AB ⟺ cos α ≥ cos δ_AB).
+    Foot within the segment → R·|asin(sin_xt)|; otherwise → R·arccos(max(p·A, p·B))
+    (the nearer endpoint). The anti-side far field (including antipodes) is correctly
+    handled by the endpoint branch.
     """
     A, B, NV, sinAB, cosAB = segs[0], segs[1], segs[2], segs[3], segs[4]
     sin_xt = (p @ NV.T) / sinAB
@@ -232,10 +248,11 @@ def _point_seg_dists(p: np.ndarray, segs) -> np.ndarray:
 
 
 def independent_min_distance_km(lat: float, lon: float, segs) -> float:
-    """独立实现：经典航空公式（半正矢 + 初始方位角）全段暴力 min。
+    """Independent implementation: classic aviation formula (haversine + initial bearing) brute-force min over all segments.
 
-    与引擎（3D 向量叉积/点积路径）刻意异构，供保真交叉验证（验收：
-    随机抽样像元与独立大圆距离计算比对）。逐段向量化、标量入参。
+    Deliberately heterogeneous from the engine (3D-vector cross/dot-product path), for
+    fidelity cross-validation (acceptance: sampled pixels compared against the independent
+    great-circle distance computation). Vectorized per segment, scalar arguments.
     """
     _, _, _, _, _, latlon = segs
     latA, lonA, latB, lonB = (np.deg2rad(a) for a in latlon)
@@ -253,15 +270,13 @@ def independent_min_distance_km(lat: float, lon: float, segs) -> float:
             np.cos(p1) * np.sin(p2) - np.sin(p1) * np.cos(p2) * np.cos(l2 - l1),
         )
 
-    d12 = _delta(latA, lonA, latB, lonB)          # 段角
+    d12 = _delta(latA, lonA, latB, lonB)
     d13 = _delta(latA, lonA, phi, lam)             # A→p
     t12 = _bearing(latA, lonA, latB, lonB)
     t13 = _bearing(latA, lonA, phi, lam)
     sin_xt = np.clip(np.sin(d13) * np.sin(t13 - t12), -1.0, 1.0)
-    xt = np.arcsin(sin_xt)                         # 有符号叉积角
+    xt = np.arcsin(sin_xt)
     d23 = _delta(latB, lonB, phi, lam)             # B→p
-    # 垂足在段内 ⟺ A 侧与 B 侧沿迹折角均 ≤ 段角（双侧检验缺一不可：
-    # 仅 A 侧会把越过 B 端的垂足误判为内点——开发期随机互证捕获）
     at = np.arccos(np.clip(np.cos(d13) / np.cos(xt), -1.0, 1.0))
     bt = np.arccos(np.clip(np.cos(d23) / np.cos(xt), -1.0, 1.0))
     interior = (at <= d12) & (bt <= d12)
@@ -269,30 +284,27 @@ def independent_min_distance_km(lat: float, lon: float, segs) -> float:
     return float(EARTH_RADIUS_KM * ang.min())
 
 
-# ---------------- 距离场引擎：层级环带候选剪枝 ----------------
 
-# 细化链（引用 grids.TIER_ORDER 单一来源）：1° → 30′ → 6′ → 3′ → 30″
 _TIER_CHAIN = TIER_ORDER
 
 _KM_PER_DEG = 2.0 * math.pi * EARTH_RADIUS_KM / 360.0
-# 环带半宽 W = 2ρ（ρ = 胞半对角线 km）+ 1 m 浮点安全余量。
-# 引理保证：子档全体像元的 argmin 段落在父档中心距离环带 [d−W, d+W] 内。
 _ANNULUS_KM = {
     t: 2.0 * tier_deg(t) * math.sqrt(0.5) * _KM_PER_DEG + 1e-3
     for t in _TIER_CHAIN
 }
 
-# fork 进程池共享段表（父进程 set 后 fork，COW 只读；完毕置 None）
 _POOL_SEGMENTS = None
 
 
 def _distance_cell(i: int, j: int, segs, chain) -> dict[str, np.ndarray]:
-    """单 1° 胞全链任务：返回 {tier: (n, m) float64}（胞内各档像元精确值）。
+    """Single 1° cell full-chain task: returns {tier: (n, m) float64} (exact values for each tier's pixels within the cell).
 
-    自包含（环带引理只引用本胞几何，无跨胞依赖）：
-    1° 中心对全部段暴力 min → 环带 stored(1°)；逐档细化：子胞候选 =
-    父胞 stored，求 min 得精确值，再按自身环带过滤出 stored 传给更细档；
-    最细档只求 min 不过滤。parents/children 全程行主序 → 胞块落位确定。
+    Self-contained (the annulus lemma references only this cell's geometry, no cross-cell
+    dependency): the 1° center computes a brute-force min over all segments → annulus
+    stored(1°); per-tier refinement: child-cell candidates = the parent cell's stored,
+    take the min for the exact value, then filter by its own annulus to obtain stored to
+    pass to finer tiers; the finest tier only takes the min without filtering.
+    parents/children stay row-major throughout → cell block placement is deterministic.
     """
     A, B, NV, sinAB, cosAB = segs[0], segs[1], segs[2], segs[3], segs[4]
     res: dict[str, np.ndarray] = {}
@@ -307,18 +319,17 @@ def _distance_cell(i: int, j: int, segs, chain) -> dict[str, np.ndarray]:
     if cand0.size == 0:
         raise RuntimeError(f"1° 胞 ({i},{j}) 环带为空——引理被破坏（实现缺陷）")
 
-    # parents: (父胞行, 父胞列, 中心 lat, 中心 lon, 候选段索引)
     parents: list[tuple[int, int, float, float, np.ndarray]] = [
         (0, 0, lat_lo + 0.5, lon_lo + 0.5, cand0)
     ]
     for k in range(1, len(chain)):
         lvl, plvl = chain[k], chain[k - 1]
-        f = int(tier_fraction(plvl) / tier_fraction(lvl))   # 父→子每边细化因子
+        f = int(tier_fraction(plvl) / tier_fraction(lvl))
         finest = k == len(chain) - 1
         w = _ANNULUS_KM[lvl]
         rp = tier_deg(plvl)
         sub_res = rp / f
-        block = int(Fraction(1) / tier_fraction(lvl))   # 该档在 1° 胞内每边像元数
+        block = int(Fraction(1) / tier_fraction(lvl))
         out = np.empty((block, block), dtype=np.float64)
         children: list[tuple[int, int, float, float, np.ndarray]] = []
         for prow, pcol, plat, plon, cand in parents:
@@ -365,15 +376,17 @@ def _pool_cell_task(cell):
 
 def distance_grids(segs, chain=_TIER_CHAIN, workers: int = 1,
                    cache_dir=None) -> dict[str, np.ndarray]:
-    """段表 → {tier: float32 全球网格}（chain 内各档精确距离值）。
+    """Segment table → {tier: float32 global grid} (exact distance values for each tier in the chain).
 
-    按 1° 胞分解自包含任务；workers > 1 时 fork 进程池并行（逐像元算术
-    与任务序无关，确定性不受并行影响——复跑 checksum 一致性由验收双跑
-    复核）。
+    Decomposed into self-contained tasks by 1° cell; when workers > 1 a fork process pool
+    runs in parallel (the per-pixel arithmetic is independent of task order, so determinism
+    is unaffected by parallelism — rerun-checksum consistency is double-checked by the
+    acceptance double-run).
 
-    cache_dir（内存护栏）：给定时报各档网格写 .npy 后以只读
-    mmap 返回——30″ 档 3.7GB 不驻留进程 RSS（文件页可回收），全量构建
-    峰值预算（≤40GB）的关键减负件；None = 纯内存（测试短链）。
+    cache_dir (memory guardrail): when given, each tier's grid is written to .npy and then
+    returned as a read-only mmap — the 30″ tier's 3.7GB does not reside in process RSS
+    (file pages are reclaimable), the key relief for the full-build peak budget (≤40GB);
+    None = pure in-memory (short chain for tests).
     """
     chain = tuple(chain)
     if cache_dir is not None:
@@ -414,7 +427,7 @@ def distance_grids(segs, chain=_TIER_CHAIN, workers: int = 1,
     except BaseException:
         for a in out.values():
             if isinstance(a, np.memmap):
-                a._mmap.close()   # noqa: SLF001 —— 异常路径显式解除映射
+                a._mmap.close()
         raise
     if cache_dir is not None:
         for t in chain:
@@ -423,16 +436,14 @@ def distance_grids(segs, chain=_TIER_CHAIN, workers: int = 1,
     return out
 
 
-# ---------------- 距离场：源级缓存与层构建 ----------------
 
-# 距离金字塔磁盘缓存（内存护栏：30″ 档 3.7GB 走 .npy mmap，不驻留 RSS）
 _PYRAMID_CACHE_DIR = REPO_ROOT / "products/.build/faults-distance"
 
 _PYRAMID_CACHE: dict[str, dict[str, np.ndarray]] = {}
 
 
 def _distance_pyramid(src_dir: str | Path = GEM_SRC_DIR) -> dict[str, np.ndarray]:
-    """真实源全链金字塔（进程内缓存：五档只算一次，~1.4×10⁵ 段）。"""
+    """Real-source full-chain pyramid (in-process cache: the five tiers are computed once, ~1.4×10⁵ segments)."""
     key = f"gem:{Path(src_dir).resolve()}"
     if key not in _PYRAMID_CACHE:
         gdf, _codes = load_gem_faults(src_dir)
@@ -454,7 +465,7 @@ VALUE_CONVENTION = (
 
 
 def build_gem_fault_distance(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 stress_kinematics__gem_fault_distance（float32，全域有值）。"""
+    """Build stress_kinematics__gem_fault_distance for the given tier (float32, values everywhere)."""
     values = _distance_pyramid()[tier]
     lat, lon = tier_centers(tier)
     attrs = {
@@ -469,8 +480,6 @@ def build_gem_fault_distance(entry: LayerEntry, tier: str) -> xr.DataArray:
         "visibility": entry.visibility,
         "value_convention": VALUE_CONVENTION,
         "source_file": GPKG_REL_PATH,
-        # 注意：不可命名 missing_value/_FillValue（zarr 后端按
-        # CF 约定当 fill 编码，读回 0 被掩 NaN 且 dtype 升 float32）
         "nodata_semantics": "无缺测：距离场全域有值（免掩膜）",
     }
     arr = da.from_array(values, chunks=tier_chunks(tier))
@@ -480,18 +489,18 @@ def build_gem_fault_distance(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 类别通道：线栅格化 + 众数聚合 ----------------
 
 def rasterize_fault_classes(geoms, codes: np.ndarray, tier: str) -> tuple[np.ndarray, int]:
-    """断层线要素 → 该档类别网格（uint8，0 = 无断层经过）。
+    """Fault line features → the tier's class grid (uint8, 0 = no fault passing through).
 
-    语义：GDAL 线默认走线算法（all_touched=False）——线穿过的像元烧录，
-    单像元宽迹线；同像元多断裂重叠取较短断裂（局部细化优先，
-    「面积较小多边形」同款原则：长度降序稳定排序 + 后烧者胜）；
-    codes=0（slip_type 缺失）不烧录、不参与重叠计数。
+    Semantics: GDAL default line algorithm for lines (all_touched=False) — pixels the line
+    crosses are burned, a single-pixel-wide trace; for overlapping faults in the same pixel
+    the shorter fault wins (local refinement first, the same "smaller-area polygon" principle:
+    stable descending-length sort + last-burner-wins); codes=0 (missing slip_type) is not
+    burned and not counted in overlap.
 
-    返回 (classes (nlat, nlon) uint8, 重叠像元数)。逐断裂包围盒开窗
-    烧录，全程确定性可复跑。
+    Returns (classes (nlat, nlon) uint8, overlap pixel count). Burning is done per-fault in a
+    bounding-box window, fully deterministic and rerunnable.
     """
     import rasterio.features as rfeatures
     from rasterio.transform import from_origin
@@ -501,32 +510,25 @@ def rasterize_fault_classes(geoms, codes: np.ndarray, tier: str) -> tuple[np.nda
     classes = np.zeros((nlat, nlon), dtype=np.uint8)
     covered = np.zeros((nlat, nlon), dtype=np.uint8)
 
-    # 长度降序（稳定排序）：后烧者胜 → 较短断裂赢重叠像元。
-    # 地理 CRS 下 shapely 的 length 单位为度——仅作相对排序，告警无谓。
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*geographic CRS.*")
         order = np.argsort([-g.length for g in geoms], kind="stable")
 
     for i in order:
         if codes[i] == NODATA:
-            continue                       # slip_type 缺失：不参与类别栅格化
+            continue
         g = geoms[i]
         minx, miny, maxx, maxy = g.bounds
-        # 行号自南起（行 0 = −90 侧，档位网格约定）：
-        # 行 r 跨 [−90+r·res, −90+(r+1)·res]；列 c 跨 [−180+c·res, ...]
         r0 = max(int(np.floor((miny + 90.0) / res)) - 1, 0)
         r1 = min(int(np.ceil((maxy + 90.0) / res)) + 1, nlat)    # exclusive
         c0 = max(int(np.floor((minx + 180.0) / res)) - 1, 0)
         c1 = min(int(np.ceil((maxx + 180.0) / res)) + 1, nlon)   # exclusive
         if r0 >= r1 or c0 >= c1:
             continue
-        # 窗口北边 = 行 r1−1 的北缘；西边 = 列 c0 的西缘
         tr = from_origin(-180.0 + c0 * res, -90.0 + r1 * res, res, res)
         burned = rfeatures.rasterize(
             [(g, 1)], out_shape=(r1 - r0, c1 - c0), transform=tr, fill=0, dtype="uint8"
         ).astype(bool)
-        # rasterio 窗口行序北起（local 0 = 行 r1−1），项目网格行 0 = −90
-        # 侧——垂直翻转后落位（翻转缺陷由位级比对测试覆盖）
         burned = burned[::-1]
         win = classes[r0:r1, c0:c1]
         classes[r0:r1, c0:c1] = np.where(burned, codes[i], win)
@@ -541,7 +543,7 @@ _MODE_CACHE: dict[tuple[str, str], np.ndarray] = {}
 
 
 def _home_tier_classes(src_dir: str | Path = GEM_SRC_DIR) -> tuple[np.ndarray, int]:
-    """主档（30″）类别网格 + 重叠像元数（进程内缓存：五档只栅格化一次）。"""
+    """Home-tier (30″) class grid + overlap pixel count (in-process cache: the five tiers rasterize only once)."""
     key = f"gem:{Path(src_dir).resolve()}"
     if key not in _CLASS_CACHE:
         gdf, codes = load_gem_faults(src_dir)
@@ -552,7 +554,7 @@ def _home_tier_classes(src_dir: str | Path = GEM_SRC_DIR) -> tuple[np.ndarray, i
 
 
 def _tier_classes(tier: str, src_dir: str | Path = GEM_SRC_DIR) -> np.ndarray:
-    """该档类别网格：主档直出，粗档 = 主档众数聚合（缓存）。"""
+    """The tier's class grid: the home tier is emitted directly, coarse tiers = home-tier mode aggregation (cached)."""
     if tier == HOME_TIER:
         return _home_tier_classes(src_dir)[0]
     key = (tier, str(Path(src_dir).resolve()))
@@ -575,7 +577,7 @@ RASTERIZATION_RULE = (
 
 
 def build_gem_fault_slip_class(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 stress_kinematics__gem_fault_slip_class（uint8 类别层）。"""
+    """Build stress_kinematics__gem_fault_slip_class for the given tier (uint8 class layer)."""
     values = _tier_classes(tier)
     lat, lon = tier_centers(tier)
     attrs = {
@@ -602,31 +604,31 @@ def build_gem_fault_slip_class(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
 FAULT_FIDELITY_LAYERS = {
     SLIP_CLASS_LAYER_ID: {"kind": "class"},
     DISTANCE_LAYER_ID: {"kind": "distance"},
 }
 
-_SAMPLE_SEED = 20260912        # 抽样确定性（复跑同样本）
-_N_SAMPLES = 120              # 每档抽样像元数（分层：均匀 + 近场）
-_DIST_TOL_KM = 1e-3           # 基础容差 1 m（近场公式异构 ~1e-5 km 量级）
-_DIST_REL_TOL = 3e-7          # 远场 float32 存储 ULP 主导：tol = max(1e-3, 3e-7·|d|)
-                              # （float32 半 ULP ≈ 6e-8·|d|，20000 km 处 ≈ 1.2e-3 km）
+_SAMPLE_SEED = 20260912
+_N_SAMPLES = 120
+_DIST_TOL_KM = 1e-3
+_DIST_REL_TOL = 3e-7
 
 
 def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                                   src_dir=None) -> dict:
-    """保真报告。
+    """Fidelity report.
 
-    类别层判据（同构）：① store 与源重算逐位一致（uint8 位级）；
-    ② 粗档类别众数一致性（= 主档 store 值众数聚合）；③ 值域 ⊆ {0} ∪
-    编码表；④ 类别分布/重叠/未分类总量（报告制）。
+    Class-layer criteria (isomorphic): ① the store is bit-identical to the source recomputation
+    (uint8 bit level); ② coarse-tier class-mode agreement (= mode aggregation of the home-tier
+    store values); ③ value range ⊆ {0} ∪ the encoding table; ④ class distribution/overlap/
+    unclassified totals (reporting only).
 
-    距离场判据（验收）：⑤ 每档分层随机抽样像元（均匀 + 近场 <50 km）
-    与独立航空公式全段暴力比对，max|Δ| ≤ 1e-3 km（硬判据）；⑥ 全域有限
-    且 ≥ 0（硬判据，免掩膜语义）；⑦ 距离分布统计（报告制）。
+    Distance-field criteria (acceptance): ⑤ per-tier stratified random pixel sampling (uniform +
+    near-field <50 km) brute-force compared against the independent aviation formula over all
+    segments, max|Δ| ≤ 1e-3 km (hard criterion); ⑥ finite everywhere and ≥ 0 (hard criterion,
+    the no-mask semantics); ⑦ distance-distribution statistics (reporting only).
     """
     src_dir = src_dir or GEM_SRC_DIR
     kind = FAULT_FIDELITY_LAYERS[layer_id]["kind"]
@@ -642,7 +644,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                     raise KeyError(f"store {store_dir} 的 {tier} 档不含 {layer_id}（先 build 再 fidelity）")
                 values[tier] = node.ds[layer_id].values
 
-        # ① 逐位一致（硬判据）
         for tier in tiers:
             expect = _tier_classes(tier, src_dir)
             n_bad = int((values[tier] != expect).sum())
@@ -652,7 +653,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-        # ② 类别众数一致性（硬判据）：粗档 == 主档 store 值众数聚合
         for tier in tiers:
             if tier == HOME_TIER:
                 continue
@@ -666,7 +666,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-        # ③ 值域（硬判据）+ ④ 类别分布（报告制）
         valid_codes = np.array(sorted(SLIP_TYPE_CODES.values()))
         for tier in tiers:
             v = values[tier]
@@ -710,7 +709,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                 v = node.ds[layer_id].values
                 lat, lon = tier_centers(tier)
 
-                # ⑥ 全域有限且 ≥ 0（硬判据）
                 n_bad = int((~np.isfinite(v)).sum() + (v < 0).sum())
                 checks.append({
                     "name": f"{tier}: 全域有限且 ≥ 0（免掩膜语义）",
@@ -718,7 +716,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                     "summary": f"违法像元 {n_bad}（期望 0）",
                 })
 
-                # ⑤ 分层随机抽样 × 独立航空公式全段暴力比对（硬判据）
                 n_flat = v.size
                 n_near = _N_SAMPLES // 2
                 near_idx = np.nonzero((v < 50.0).ravel())[0]
@@ -756,7 +753,6 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                     ),
                 })
 
-                # ⑦ 距离分布统计（报告制）
                 checks.append({
                     "name": f"{tier}: 距离分布（报告制）",
                     "status": "report",
@@ -778,7 +774,7 @@ def build_faults_fidelity_report(store_dir, layer_id: str, tiers: list[str],
     return {
         "layer": layer_id,
         "store": str(store_dir),
-        "integral_tolerance": INTEGRAL_TOL,   # 距离场无积分量；保留报告器统一字段
+        "integral_tolerance": INTEGRAL_TOL,
         "result": "FAIL" if n_fail else "PASS",
         "n_checks": len(checks),
         "checks": checks,

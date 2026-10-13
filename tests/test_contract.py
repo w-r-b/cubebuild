@@ -1,4 +1,4 @@
-"""契约加载与铁律前置校验测试（外部行为：契约解析 + 违规即失败指明层）。"""
+"""Contract loading and iron-rule precondition validation tests (external behavior: contract parsing + violation fails and names the layer)."""
 
 import pytest
 
@@ -42,19 +42,13 @@ def _write(tmp_path, body):
 def test_load_real_contract():
     c = load_contract(MAPPING)
     assert len(c.layers) == 47
-    # 六项待确认再分发许可的数据集共 12 层为 internal
     # （GLAD-M35×5 + SEMUCB×2 + PB2002×3 + GST1×1 +
-    # HFgrid14×1 = 12，枚举明细为准）→ 25 public / 22
-    # internal（既有 10 + 新 12）
     assert sum(1 for l in c.layers if l.visibility == "public") == 25
     assert sum(1 for l in c.layers if l.visibility == "internal") == 22
-    # 热流部分退出拆分口径：HFgrid14 层（源
-    # 栅格再分发）退 internal、密度层（聚合分析产物，不可恢复源记录）留
-    # 公开——数据集粒度的部分退出，非全退/全留
     hf = next(l for l in c.layers if l.id == "thermal__hfgrid14_heatflow")
     hd = next(l for l in c.layers if l.id == "thermal__heatflow_density")
     assert hf.visibility == "internal" and hd.visibility == "public"
-    validate_contract(c)  # 定稿契约必须整体通过铁律
+    validate_contract(c)
 
 
 def test_pixel_area_entry_fields():
@@ -65,11 +59,10 @@ def test_pixel_area_entry_fields():
     assert pa.unit == "km2"
     assert pa.resampling == "exact_formula"
     assert pa.dims == ("lat", "lon")
-    assert pa.native_res_deg is None  # exact：解析公式无档位约束
+    assert pa.native_res_deg is None
 
 
 def test_iron_rule_rejects_finer_tier_and_names_layer(tmp_path):
-    # native 0.5deg 却进 6min(0.1°) 档 → 铁律违规，指明违规层
     p = _write(
         tmp_path,
         """
@@ -91,7 +84,6 @@ def test_iron_rule_rejects_finer_tier_and_names_layer(tmp_path):
 
 
 def test_iron_rule_allows_equal_tier(tmp_path):
-    # native 0.1deg 进 6min(0.1°) 档：等宽不算细于，放行
     p = _write(
         tmp_path,
         """
@@ -150,7 +142,7 @@ def test_missing_required_field(tmp_path):
     unit: m
     resampling: conservative_area_weighted
 """
-    p = _write(tmp_path, body)  # 缺 mask
+    p = _write(tmp_path, body)
     with pytest.raises(ContractViolation) as ei:
         load_contract(p)
     assert "mask" in str(ei.value)

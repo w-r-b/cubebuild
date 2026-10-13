@@ -1,14 +1,20 @@
-"""脱敏输入数据集清单判据（input-datasets.csv）。
+"""Checks for the desensitized input-dataset list (input-datasets.csv).
 
-清单属公开内容集：由私有数据台账派生、只含对外字段；内部决策记录、待决状态、
-处置日期与使用陷阱等注记一律不得出现。本模块守护四条：列集合恰为字段白名单
-id/name/doi/licence/format；行集与口径声明一致（口径写明纳入/排除及理由，且行数
-与之一致）；注记类内容零出现（含日期样、CJK 字符与内部过程用语）；外部读者可读
-（英文、字段齐全、列名自解释）。
+The list is part of the public content set: derived from a private data ledger and containing
+only external-facing fields; notes such as internal decision records, pending states,
+disposition dates, and usage traps must never appear. This module guards four things: the
+column set is exactly the field whitelist
+id/name/doi/licence/format; the row set is consistent with the scope statement (the scope
+states inclusion/exclusion and reasons, and the row count
+matches it); note-class content never appears (including date-like patterns, CJK characters,
+and internal process wording); external readers can read it
+(English, complete fields, self-explanatory column names).
 
-私有侧来源（数据台账、论文来源表/补充许可表、痕迹扫描器）不在本工作区时，相应
-交叉核对整体跳过（沿用缺失即 skip 惯例）。本模块自身受公开面痕迹扫描约束，故受
-词表约束的字面量按运行时拼接或转义构造（自指悖论）。
+When the private-side sources (data ledger, paper source table/supplementary licence table,
+trace scanner) are not in this workspace, the corresponding
+cross-checks are skipped entirely (following the absent-means-skip convention). This module
+is itself subject to the public-surface trace scan, so literals constrained by the term list
+are built by run-time concatenation or escaping (self-reference paradox).
 """
 
 import csv
@@ -23,7 +29,6 @@ LIST_PATH = REPO / "input-datasets.csv"
 
 WHITELIST = ("id", "name", "doi", "licence", "format")
 
-# 注记类零出现判据：日期样、CJK/全角字符、内部过程用语（中文类由 CJK 类覆盖）
 POISON = (
     r"\d{4}-\d{2}-\d{2}",
     "[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]",
@@ -39,7 +44,7 @@ def _non_comment_lines(text: str) -> list[str]:
 
 
 def _find_violations(text: str) -> list[str]:
-    """清单判据本体：返回问题列表（空列表＝通过）。"""
+    """The list check itself: returns a list of problems (empty list = pass)."""
     problems: list[str] = []
     for pat in POISON:
         for m in re.finditer(pat, text, re.IGNORECASE):
@@ -96,7 +101,7 @@ def test_scope_statement_and_count_consistent():
     m = re.search(r"the (\d+) source datasets", scope)
     assert m, "口径缺少纳入总数声明"
     rows = _data_rows(text)[1:]
-    assert int(m.group(1)) == len(rows)  # 行数与该口径一致
+    assert int(m.group(1)) == len(rows)
     ids = {int(r[0]) for r in rows}
     for excluded in (12, 26):
         assert f"id {excluded}" in scope, excluded
@@ -105,9 +110,9 @@ def test_scope_statement_and_count_consistent():
     assert "non-commercial" in scope and "CC BY-NC-ND 4.0" in scope
     assert "not included in the public release" in scope
     for restricted in ("WGM2012", "GSRM v2.2", "GEM Global Active Faults",
-                       "Global Basins"):  # 受限分发条目亦须在口径中具名
+                       "Global Basins"):
         assert restricted in scope, restricted
-    assert "Lines beginning with" in scope  # 供外部读者的注释约定说明
+    assert "Lines beginning with" in scope
 
 
 def test_scope_tracks_catalogue():
@@ -122,12 +127,10 @@ def test_scope_tracks_catalogue():
     rows = _data_rows(_read())[1:]
     assert [int(r[0]) for r in rows] == [int(r["id"]) for r in included]
     by_id = {int(r["id"]): r for r in included}
-    for r in rows:  # 格式字段逐字随台账
+    for r in rows:
         assert r[4] == by_id[int(r[0])]["format"], r[0]
 
 
-# 台账 id → 论文来源表与补充许可表行号（两表同序；SEDC v1.0 投稿件）；
-# 热流、地壳模型两条合并条目各取两行
 SOURCE_TABLE_ROWS: dict[int, list[int]] = {
     1: [1], 2: [2], 3: [3], 4: [4], 5: [5], 6: [6, 7], 7: [8], 8: [9], 9: [10],
     10: [11], 11: [12], 13: [13], 14: [23], 15: [14], 16: [15], 19: [16, 24],
@@ -158,7 +161,7 @@ def test_licence_basis_tracks_submission_table():
         rid, licence = int(r[0]), r[3]
         for n in SOURCE_TABLE_ROWS[rid]:
             cell = s4[n][5]
-            if cell == "\u2014":  # 表内未登记依据：清单须给出可读的替代表述
+            if cell == "\u2014":
                 assert "no licence basis stated" in licence, (rid, n)
                 continue
             prefix = cell.split(";")[0].split("(")[0].strip()
@@ -184,11 +187,11 @@ def test_trace_scan_zero():
 
 
 _SAMPLES = (
-    "202" + "6-09-11: excluded from distribution",   # 处置日期样
-    "\u88c1\u5b9a" + ": keep for self-use only",     # CJK 决策类
-    "pending author confirmation",                   # 待决/协商状态
-    "filename trap: rename before use",              # 使用陷阱
-    "internal audit record",                         # 内部过程记录
+    "202" + "6-09-11: excluded from distribution",
+    "\u88c1\u5b9a" + ": keep for self-use only",
+    "pending author confirmation",
+    "filename trap: rename before use",
+    "internal audit record",
 )
 
 

@@ -1,14 +1,19 @@
-"""en↔en 保真检查器判据测试。
+"""Checks for the en↔en fidelity checker.
 
-夹具策略：
-① 现行配对（ESSD 英文稿 ↔ NSD 稿＋Supplementary 产物）五类对象零差异（回归基线）；
-② 对象非空自检（防空跑假绿：提取器失灵时集合级 diff 会静默通过）；
-③ 五类真实基底变异负例各一（数字/层 id/DOI·URL/引文键/图注数据值）——注入形态即
-   「漏数字、层 id 篡改、引用键丢失、DOI 改动」所列缺陷；
-④ 白名单无死条目：逐条删除复算，每条登记项都应确有其事（防豁免面腐化）；
-⑤ Supplementary 载体缺席即命中（附录长表内容不得两头不见）。
+Fixture strategy:
+(1) current pairing (ESSD English manuscript ↔ NSD manuscript + Supplementary artifacts)
+    zero difference across the five object classes (regression baseline);
+(2) non-empty object self-check (guards against a false-green empty run: a failing extractor
+    would let a set-level diff pass silently);
+(3) one negative per the five real-base classes (number / layer id / DOI·URL / citation key /
+    figure-caption data value) — the injected forms are exactly the defects listed as
+    "missing number, layer id tampering, citation key loss, DOI change";
+(4) whitelist has no dead entries: recompute after deleting each one, every registered entry
+    must be real (guards against exemption-surface rot);
+(5) a missing Supplementary carrier is immediately caught (appendix long-table content must
+    not vanish from both ends).
 
-运行：pytest tests/test_fidelity_nsd.py（轻量，只读 md 与 csv）。
+Run: pytest tests/test_fidelity_nsd.py (lightweight, reads md and csv only).
 """
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ sys.path.insert(0, str(REPO / "paper" / "scripts"))
 
 try:
     import check_fidelity_nsd as cf  # noqa: E402
-except ImportError:  # 公开仓不含论文侧脚本与产物：缺件即跳过（沿用缺件跳过惯例）
+except ImportError:
     cf = None
 
 pytestmark = pytest.mark.skipif(
@@ -38,13 +43,13 @@ def pair() -> tuple[str, str]:
 
 
 def test_current_pair_clean(pair):
-    """现行配对零差异（结构差异已在 STRUCTURAL_EXCEPTIONS 显式登记）。"""
+    """Current pairing has zero differences (structural differences are explicitly registered in STRUCTURAL_EXCEPTIONS)."""
     findings = cf.run_checks(*pair)
     assert findings == [], findings
 
 
 def test_objects_nonempty(pair):
-    """五类对象非空（防空跑通过）。"""
+    """The five object classes are non-empty (guards against a false-green empty run)."""
     essd, nsd = pair
     supp = cf.supplementary_text()
     assert len(cf._side_numbers(essd, False)) > 400
@@ -56,7 +61,7 @@ def test_objects_nonempty(pair):
 
 
 def test_mutated_number_detected(pair):
-    """数字走样：NSD 稿表 2 像元数 64,800→64,801 → 命中。"""
+    """Number drift: NSD manuscript Table 2 pixel count 64,800→64,801 → caught."""
     essd, nsd = pair
     assert "| Pixels | 64,800 |" in nsd
     findings = cf.run_checks(essd, nsd.replace("| Pixels | 64,800 |", "| Pixels | 64,801 |", 1))
@@ -64,7 +69,7 @@ def test_mutated_number_detected(pair):
 
 
 def test_mutated_layer_id_detected(pair):
-    """层 id 篡改：NSD 稿层 id 截断 → 命中。"""
+    """Layer id tampering: an NSD manuscript layer id truncated → caught."""
     essd, nsd = pair
     assert "topography__bedrock_elevation" in nsd
     findings = cf.run_checks(essd, nsd.replace("topography__bedrock_elevation",
@@ -73,7 +78,7 @@ def test_mutated_layer_id_detected(pair):
 
 
 def test_mutated_doi_detected(pair):
-    """DOI 改动：NSD 参考文献 DOI 末位篡改 → 命中。"""
+    """DOI change: the last digit of an NSD reference DOI is tampered → caught."""
     essd, nsd = pair
     assert "10.25921/fd45-gt74" in nsd
     findings = cf.run_checks(essd, nsd.replace("10.25921/fd45-gt74", "10.25921/fd45-gt75", 1))
@@ -81,7 +86,7 @@ def test_mutated_doi_detected(pair):
 
 
 def test_mutated_citation_key_detected(pair):
-    """引用键丢失：删 NSD 参考文献一条目 → 命中（引文键集合 + 逐条比对）。"""
+    """Citation key loss: deleting one NSD reference entry → caught (citation-key set + per-entry comparison)."""
     essd, nsd = pair
     assert "46. Neumann, F.," in nsd
     findings = cf.run_checks(essd, nsd.replace("46. Neumann, F.,", "46. Xx, F.,", 1))
@@ -89,7 +94,7 @@ def test_mutated_citation_key_detected(pair):
 
 
 def test_mutated_figure_caption_value_detected(pair):
-    """图注数据值走样：图 3 题注 −10776→−10777 → 命中。"""
+    """Figure-caption data-value drift: figure 3 caption −10776→−10777 → caught."""
     essd, nsd = pair
     assert "−10776 to 8354 m" in nsd
     findings = cf.run_checks(essd, nsd.replace("−10776 to 8354 m", "−10777 to 8354 m", 1))
@@ -97,7 +102,7 @@ def test_mutated_figure_caption_value_detected(pair):
 
 
 def test_author_date_leftover_detected(pair):
-    """编号体例的机械面：NSD 正文残留 author-date 引用 → 命中。"""
+    """Mechanical surface of the numeric citation style: an author-date citation left in the NSD body → caught."""
     essd, nsd = pair
     findings = cf.run_checks(essd, nsd.replace("The quality evidence is organized",
                                                "(Reichstein et al., 2019) The quality evidence is organized", 1))
@@ -105,7 +110,7 @@ def test_author_date_leftover_detected(pair):
 
 
 def test_whitelist_entries_all_needed(pair, monkeypatch):
-    """白名单无死条目：逐条删除复算，每条登记项都必须确有其事。"""
+    """The whitelist has no dead entries: recompute after deleting each one, every registered entry must be real."""
     essd, nsd = pair
     dead: list[tuple[str, str, str, str]] = []
     for entry in cf.STRUCTURAL_EXCEPTIONS:
@@ -118,8 +123,8 @@ def test_whitelist_entries_all_needed(pair, monkeypatch):
 
 
 def test_supplementary_carrier_missing_detected(pair, monkeypatch, tmp_path):
-    """Supplementary 载体缺席：附录长表内容在 NSD 侧两头不见 → 命中。"""
+    """Supplementary carrier absent: appendix long-table content is missing from both ends on the NSD side → caught."""
     essd, nsd = pair
-    monkeypatch.setattr(cf, "SUPPLEMENTARY_DIR", tmp_path)   # 空目录
+    monkeypatch.setattr(cf, "SUPPLEMENTARY_DIR", tmp_path)
     findings = cf.run_checks(essd, nsd)
     assert any(f.startswith("[层 id]") for f in findings), findings

@@ -1,15 +1,21 @@
-"""NSD 编号引用转换与三重核验测试。
+"""NSD numbered-reference conversion and triple verification tests.
 
-判据（参考文献转换：机械转换（键→编号映射）＋三重核验）：
-① 引用键集合相对基线不变；② 每条 DOI 不变；③ 编号＝首现序（正文上标首现序 1..N、
-   条目编号前缀 1..N、无孤儿）。负例须逐条被拦截——「漏数字/引用键丢失/DOI 改动/
-   编号错序」注入形态。
+Criteria (reference conversion: mechanical conversion (key→number mapping) +
+triple verification):
+① reference-key set unchanged relative to the baseline; ② every DOI unchanged;
+③ numbering = first-occurrence order (body superscript first-occurrence order
+   1..N, entry number prefixes 1..N, no orphans). Each negative case must be
+   caught — the injected forms "missing number / lost reference key / altered
+   DOI / out-of-order numbering".
 
-另含 ESSD 冻结轨的**字节冻结**判据：ESSD 英文稿与中文稿相对冻结 commit 536546a 只容许
-登记在案的具名例外替换（事实核验轮勘误），
-其余逐字节不变（迁移以 ESSD 英文稿为唯一派生源，冻结轨不得被顺手改写）。
+Also includes the ESSD frozen track's **byte freeze** criterion: relative to
+frozen commit 536546a, the ESSD English and Chinese manuscripts allow only the
+registered named-exception substitutions (fact-check round errata), and are
+otherwise byte-for-byte unchanged (migration derives solely from the ESSD
+English manuscript; the frozen track must not be rewritten in passing).
 
-运行：pytest tests/test_nsd_references.py（轻量，只读 md 与一次 git show）。
+Run: pytest tests/test_nsd_references.py (lightweight; reads md and one git
+show).
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ sys.path.insert(0, str(REPO / "paper" / "scripts"))
 
 try:
     import nsd_citations as nc  # noqa: E402
-except ImportError:  # 公开仓不含论文侧脚本与产物：缺件即跳过（沿用缺件跳过惯例）
+except ImportError:
     nc = None
 
 pytestmark = pytest.mark.skipif(
@@ -32,7 +38,7 @@ pytestmark = pytest.mark.skipif(
 
 BASELINE = REPO / "paper" / "manuscript" / "SEDC-manuscript-en.md"
 NSD = REPO / "paper" / "manuscript" / "SEDC-manuscript-nsd-en.md"
-FROZEN_COMMIT = "536546a"          # ESSD 冻结基线
+FROZEN_COMMIT = "536546a"
 
 
 @pytest.fixture(scope="module")
@@ -41,14 +47,17 @@ def pair() -> tuple[str, str]:
 
 
 def test_triple_verification_clean(pair):
-    """三重核验零发现（引用键集合 / 逐条 DOI / 编号＝首现序）。"""
+    """Triple verification with zero findings (reference-key set / per-entry
+    DOI / numbering = first-occurrence order)."""
     essd, nsd = pair
     findings = nc.verify(nsd, essd)
     assert findings == [], findings
 
 
 def test_numbering_is_first_occurrence(pair):
-    """编号＝首现序：正文上标首现序列与条目编号前缀均为 1..N，且首现序即分配序。"""
+    """Numbering = first-occurrence order: both the body superscript
+    first-occurrence sequence and the entry number prefixes are 1..N, and
+    first-occurrence order is the assignment order."""
     _, nsd = pair
     body, refs = nc.split_sections(nsd, "# References")
     order = [int(x) for m in nc.SUP_RE.finditer(body) for x in m.group(1).split(",")]
@@ -60,7 +69,8 @@ def test_numbering_is_first_occurrence(pair):
 
 
 def test_entry_counts_match_baseline(pair):
-    """条目数不变：NSD 编号条目数 = ESSD 基线条目数（「99 条」为笔误，实测 49）。"""
+    """Entry count unchanged: NSD numbered entry count = ESSD baseline entry
+    count ('99 entries' was a typo; actual 49)."""
     essd, nsd = pair
     base = nc.parse_entries(nc.split_sections(essd, "# References")[1], numbered=False)
     got = nc.parse_entries(nc.split_sections(nsd, "# References")[1], numbered=True)
@@ -68,7 +78,8 @@ def test_entry_counts_match_baseline(pair):
 
 
 def test_mutated_doi_detected(pair):
-    """② 每条 DOI 不变：篡改 NSD 条目 DOI 末位 → 命中。"""
+    """② every DOI unchanged: tampering the last digit of an NSD entry DOI →
+    detected."""
     essd, nsd = pair
     assert "10.1093/gji/ggae270" in nsd
     findings = nc.verify(nsd.replace("10.1093/gji/ggae270", "10.1093/gji/ggae271"), essd)
@@ -76,7 +87,7 @@ def test_mutated_doi_detected(pair):
 
 
 def test_dropped_entry_detected(pair):
-    """① 引用键集合不变：删 NSD 一条目 → 命中。"""
+    """① reference-key set unchanged: deleting one NSD entry → detected."""
     essd, nsd = pair
     line = [l for l in nsd.split("\n") if l.startswith("24. Bird, P.")]
     assert len(line) == 1
@@ -85,7 +96,8 @@ def test_dropped_entry_detected(pair):
 
 
 def test_extra_entry_detected(pair):
-    """① 反向：NSD 增一条基线没有的条目 → 命中（凑数/串号面）。"""
+    """① reverse: NSD gains an entry the baseline lacks → detected (padding /
+    numbering insertion surface)."""
     essd, nsd = pair
     findings = nc.verify(nsd.replace("\n# Funding", "\n50. Zzfake, Z. Padding. *J. Test* **1**, 1 (2020)."
                                      " https://doi.org/10.1/fake\n\n# Funding", 1), essd)
@@ -93,7 +105,8 @@ def test_extra_entry_detected(pair):
 
 
 def test_out_of_order_numbering_detected(pair):
-    """③ 编号＝首现序：把正文首现的两个编号对调 → 命中（编号错序）。"""
+    """③ numbering = first-occurrence order: swapping the two first-occurring
+    body numbers → detected (out-of-order numbering)."""
     essd, nsd = pair
     assert "^1,2^" in nsd
     findings = nc.verify(nsd.replace("^1,2^", "^2,1^", 1), essd)
@@ -101,7 +114,8 @@ def test_out_of_order_numbering_detected(pair):
 
 
 def test_broken_entry_prefix_detected(pair):
-    """③ 条目编号前缀：把第 1 条前缀改为 2 → 命中（缺号/乱序）。"""
+    """③ entry number prefix: changing the first prefix to 2 → detected (missing
+    / out-of-order number)."""
     essd, nsd = pair
     assert nsd.count("\n1. Reichstein") == 1
     findings = nc.verify(nsd.replace("\n1. Reichstein", "\n2. Reichstein", 1), essd)
@@ -109,17 +123,13 @@ def test_broken_entry_prefix_detected(pair):
 
 
 def test_orphan_entry_detected(pair):
-    """③ 无孤儿：正文引用数 ≠ 条目数（删一处正文引用）→ 命中。"""
+    """③ no orphans: body citation count ≠ entry count (deleting one body
+    citation) → detected."""
     essd, nsd = pair
     findings = nc.verify(nsd.replace("^49^", "", 1), essd)
     assert any(f.startswith("[③编号]") for f in findings), findings
 
 
-# 冻结轨具名例外（事实核验轮）：
-# 两处事实误标勘误（GLAD-M35 的 eta 非 ξ；GUM 20,958 为 pyroclastic）＋
-# 表 5/表 3「测试与可复现性」行对象-数字同口径同步（357 = 490 − 论文侧 133）。
-# 每条例外须在基线中恰命中一次（死条目即失败）；例外之外任何改动（第三处）在
-# 施加替换后的逐字节比较中仍被拦截。
 FROZEN_EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
     "SEDC-manuscript-en.md": [
         ("eta is ξ, the radial anisotropy parameter, dimensionless)",
@@ -141,7 +151,9 @@ FROZEN_EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
 
 
 def test_essd_baseline_frozen():
-    """ESSD 冻结轨字节冻结：相对 536546a 施加登记具名例外后逐字节相等；其余改动即失败。"""
+    """ESSD frozen-track byte freeze: after applying the registered named
+    exceptions, byte-for-byte equal relative to 536546a; any other change
+    fails."""
     for name, subs in FROZEN_EXCEPTIONS.items():
         blob = subprocess.run(["git", "show", f"{FROZEN_COMMIT}:paper/manuscript/{name}"],
                               cwd=REPO, capture_output=True, check=True).stdout.decode("utf-8")

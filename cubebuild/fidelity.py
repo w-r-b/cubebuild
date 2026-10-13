@@ -1,24 +1,32 @@
-"""保真验证 harness（积分量硬判据 + 分位数报告制 + 接缝检查）。
+"""Fidelity-verification harness (integral hard criterion + quantile reporting + seam check).
 
-分层通用性（如实声明）：
-- 层无关（可复用）：fidelity_checks / seam_check / 直方图分位数 / tier_stats
-  ——任何层给出「源统计 dict + 档位数组」即可接入；
-- ETOPO 专属：source_stats / build_fidelity_report（288 瓦网格、15° 接缝几何）。
-  后续各层各自提供本层 source_stats 并扩展 CLI 分发，不能直接换 --layer 复用。
-- 派生层专属：build_derived_fidelity_report——坡度/起伏度的「源」
-  即 store 内高程层，保真 = 与高程层逐档一致性（全网格）；陆海掩膜自
-  v1 重建起为冰面口径，源 = 全域 ice-surface 数组（surface 优先
-  瓦片选择），保真 = 与该数组重算链逐位一致；外加物理值域硬判据。
-  一致性检查严格强于接缝检查（派生层逐位等于 f(高程) ⇒ 无派生引入的缝），
-  故不另跑 seam_check。
+Layer generality (stated honestly):
+- layer-agnostic (reusable): fidelity_checks / seam_check / histogram quantiles /
+  tier_stats — any layer that provides a "source-stats dict + tier arrays" can hook in;
+- ETOPO-specific: source_stats / build_fidelity_report (288-tile grid, 15° seam geometry).
+  Subsequent layers each supply their own source_stats and extend the CLI dispatch;
+  they cannot be reused simply by swapping --layer.
+- derived-layer-specific: build_derived_fidelity_report — for slope/relief the "source"
+  is the elevation layer inside the store, and fidelity = per-tier agreement with the
+  elevation layer (full grid); the land-sea mask, since the v1 rebuild, uses the
+  ice-surface convention, its source = the global ice-surface array (surface-first
+  tile selection), and fidelity = bit-identical match with that array's recomputation
+  chain; plus physical value-range hard criteria.
+  The consistency check is strictly stronger than the seam check (a derived layer
+  bit-equal to f(elevation) ⇒ no seam introduced by derivation), so seam_check is
+  not run separately.
 
-判据：
-- 连续层积分量：各档相对源偏差 < 0.1%（硬阈值，FAIL 即拦截）；
-- 分位数偏移：报告制（保守平均物理上必然压缩极值，无单点硬容差）；
-- 接缝检查：瓦片边界处差分分布 vs 内部基线（报告制，比值异常即提示）。
+Criteria:
+- continuous-layer integral: per-tier deviation from source < 0.1% (hard threshold,
+  FAIL blocks);
+- quantile shift: reporting only (conservative averaging must physically compress
+  extremes, no single-point hard tolerance);
+- seam check: difference distribution at tile boundaries vs an interior baseline
+  (reporting only; an anomalous ratio flags it).
 
-直方图分位数：等宽 1m bin 覆盖 [-11000, 9000] m，bin 内 CDF 线性插值，
-精度亚米级——对米级高程分位数报告足够。
+Histogram quantiles: equal-width 1m bins covering [-11000, 9000] m, CDF linearly
+interpolated within a bin, sub-meter precision — sufficient for meter-level
+elevation quantile reporting.
 """
 
 import json
@@ -50,16 +58,15 @@ from .etopo import (
 )
 from .grids import grid_shape, tier_centers, tier_deg
 
-INTEGRAL_TOL = 1e-3          # 积分量相对偏差硬判据（< 0.1%）
+INTEGRAL_TOL = 1e-3
 HIST_LO, HIST_HI = -11000.0, 9000.0
 HIST_BIN = 1.0
 N_BINS = int((HIST_HI - HIST_LO) / HIST_BIN)
 
-# 派生层保真已实现清单（CLI 分发用；pixel_area 由结构验证的解析公式核对覆盖）
 DERIVED_FIDELITY_LAYERS = frozenset(
     {"derived__landsea_mask", "derived__slope", "derived__relief"}
 )
-ELEVATION_LAYER_ID = "topography__bedrock_elevation"   # 派生层的源层
+ELEVATION_LAYER_ID = "topography__bedrock_elevation"
 
 
 def hist_add(
@@ -69,11 +76,12 @@ def hist_add(
     hi: float = HIST_HI,
     bin_width: float = HIST_BIN,
 ) -> np.ndarray:
-    """把有限值累进固定 bins 直方图（uint64）。values 可为 ndarray/DataArray。
+    """Accumulate finite values into a fixed-bins histogram (uint64). values may be an ndarray/DataArray.
 
-    bins 几何由 (lo, hi, bin_width) 指定并须与 hist 长度一致（防调用方
-    几何与预分配不符时静默裁剪）——起供非高程层（mGal/nT 等）以
-    各自值域复用；默认参数即 ETOPO 高程几何。
+    The bins geometry is given by (lo, hi, bin_width) and must match the hist length
+    (to prevent silent clipping when the caller's geometry mismatches the preallocation)
+    — it is available for non-elevation layers (mGal/nT etc.) to reuse with their own
+    value ranges; the default arguments are the ETOPO elevation geometry.
     """
     v = np.asarray(values).ravel()
     v = v[np.isfinite(v) & (v != NODATA)]
@@ -92,7 +100,7 @@ def quantiles_from_hist(
     lo: float = HIST_LO,
     bin_width: float = HIST_BIN,
 ) -> dict[str, float]:
-    """直方图 → 分位数：bin 内按均匀分布做 CDF 线性插值（精度亚 bin）。"""
+    """Histogram → quantiles: CDF linearly interpolated within a bin under a uniform distribution (sub-bin precision)."""
     total = int(hist.sum())
     if total == 0:
         return {f"q{q:g}": float("nan") for q in qs}
@@ -113,10 +121,10 @@ def quantiles_from_hist(
 
 
 def _tile_stats(path: Path, lat_top: float) -> tuple[float, np.ndarray, int]:
-    """单片瓦 → (Σ v·A, 直方图, 像元数)。A 为 15s 行解析面积（km²）。
+    """Single tile → (Σ v·A, histogram, pixel count). A is the 15s analytic row area (km²).
 
-    与构建路径共用 read_tile_validated（nodata 即显式失败），
-    保证积分统计与构建产物口径一致。
+    Shares read_tile_validated with the build path (nodata fails explicitly), ensuring
+    the integral statistics use the same convention as the build artifacts.
     """
     data = read_tile_validated(path)
     w = row_areas_km2(lat_top, TILE_SHAPE[0], SRC_RES_DEG)
@@ -126,7 +134,7 @@ def _tile_stats(path: Path, lat_top: float) -> tuple[float, np.ndarray, int]:
 
 
 def source_stats(src_dir) -> dict:
-    """源（15s 全球马赛克）统计：Σ v·A + 直方图 + 计数。"""
+    """Source (15s global mosaic) statistics: Σ v·A + histogram + count."""
     tiles = scan_tiles(src_dir)
     sum_va, hist, count = 0.0, np.zeros(N_BINS, dtype=np.uint64), 0
     for label in (b + c for b in LAT_BANDS for c in LON_COLS):
@@ -140,11 +148,12 @@ def source_stats(src_dir) -> dict:
 
 
 def tier_stats(arr: xr.DataArray, tier: str) -> dict:
-    """档位数组统计（分块计算，行面积用该档解析公式）。
+    """Tier-array statistics (computed chunk-wise, row areas via the tier's analytic formula).
 
-    注意：w 自 90° 北向降序生成，store 行 0 为最南行——逐行配对正确
-    依赖球面行面积关于赤道回文（sin 对称）；若改椭球/非对称权重，
-    必须改为按行坐标显式配对。
+    Note: w is generated descending from 90° north, while store row 0 is the southernmost
+    row — the correct row-by-row pairing relies on the spherical row area being palindromic
+    about the equator (sine symmetry); if you switch to ellipsoidal/asymmetric weights, you
+    must pair explicitly by row coordinate.
     """
     nlat, nlon = grid_shape(tier)
     if arr.shape != (nlat, nlon):
@@ -175,10 +184,10 @@ def fidelity_checks(
     hist_spec: tuple[float, float, float] = (HIST_LO, HIST_HI, HIST_BIN),
     unit: str = "m",
 ) -> list[dict]:
-    """单档保真检查项（积分量硬判据 + 分位数报告）。
+    """Single-tier fidelity checks (integral hard criterion + quantile reporting).
 
-    hist_spec = (lo, hi, bin_width)：分位数直方图几何（起供非高程层
-    复用，默认 ETOPO 高程）；unit 仅进报告文案。
+    hist_spec = (lo, hi, bin_width): the quantile-histogram geometry (available for
+    non-elevation layers to reuse, default ETOPO elevation); unit only enters the report text.
     """
     rel = abs(tier_s["sum_va"] - src["sum_va"]) / abs(src["sum_va"])
     checks = [
@@ -208,10 +217,11 @@ def fidelity_checks(
 
 
 def seam_check(arr: xr.DataArray, tier: str, tile_deg: float = 15.0) -> dict:
-    """接缝检查：15° 瓦片边界差分 vs 内部基线（报告制）。
+    """Seam check: 15° tile-boundary differences vs an interior baseline (reporting only).
 
-    边界列/行处相邻像元差分的 P99.9 与内部同样间距差分的 P99.9 比较；
-    比值 ~1 → 边界与内部梯度同分布（无异常值带）。
+    The P99.9 of adjacent-pixel differences at boundary columns/rows is compared against
+    the P99.9 of differences at the same spacing in the interior; a ratio ~1 means the
+    boundary and interior gradients share the same distribution (no anomalous-value band).
     """
     nlat, nlon = arr.shape
     step = int(round(tile_deg / tier_deg(tier)))
@@ -224,19 +234,17 @@ def seam_check(arr: xr.DataArray, tier: str, tile_deg: float = 15.0) -> dict:
         vals = []
         for a, b in pairs:
             idx = rng.integers(0, nlat if axis == 0 else nlon, size=200)
-            if axis == 0:  # 经度边界：行采样、列对 (b-1, b)
+            if axis == 0:
                 vals.append(np.abs(arr[idx, a] - arr[idx, b]).compute())
-            else:          # 纬度边界：列采样、行对 (a-1, a)
+            else:
                 vals.append(np.abs(arr[a, idx] - arr[b, idx]).compute())
         return np.concatenate(vals)
 
-    # 经度边界（列 step..；内部对照取非边界列）
     bcols = [c for c in range(step, nlon, step)]
     icols = [c for c in range(1, nlon) if c % step != 0]
     seam_h = p999(sample_diff([(c - 1, c) for c in bcols], axis=0))
     base_h = p999(sample_diff(
         [(c - 1, c) for c in rng.choice(icols, size=len(bcols))], axis=0))
-    # 纬度边界（行 step..）
     brows = [r for r in range(step, nlat, step)]
     irows = [r for r in range(1, nlat) if r % step != 0]
     seam_v = p999(sample_diff([(r - 1, r) for r in brows], axis=1))
@@ -256,10 +264,10 @@ def seam_check(arr: xr.DataArray, tier: str, tile_deg: float = 15.0) -> dict:
 
 
 def build_fidelity_report(store_dir, layer_id: str, tiers: list[str], src_dir) -> dict:
-    """保真报告：源统计 × 各档统计 × 接缝检查。源未集齐时抛 SourceNotReady。"""
+    """Fidelity report: source statistics × per-tier statistics × seam check. Raises SourceNotReady when the source is incomplete."""
     from .etopo import require_full_coverage
 
-    require_full_coverage(src_dir)   # 源不齐 → 明确失败（而非中途 KeyError）
+    require_full_coverage(src_dir)
     src = source_stats(src_dir)
     checks: list[dict] = []
     with xr.open_datatree(store_dir, engine="zarr", chunks={}) as tree:
@@ -290,14 +298,15 @@ def _summary_check(checks: list, name: str, ok: bool, summary: str) -> None:
 
 
 def build_derived_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> dict:
-    """派生层保真报告：逐档一致性重算 + 值域硬判据。
+    """Derived-layer fidelity report: per-tier consistency recomputation + value-range hard criteria.
 
-    坡度/起伏度：源 = store 内高程层（manifest derived_from），全网格逐位
-    重算一致（同一确定性算子、同一 float32 输入 → 逐位一致是硬判据）；
-    陆海掩膜（冰面口径）：源 = 全域 ice-surface 数组（瓦片直读，
-    非 store 层），同样逐位重算一致。外加物理值域（slope∈[0°,90°]、
-    relief≥0、mask∈{0,1}、陆地占比区间）。store 缺高程层或派生层时
-    抛 KeyError。
+    Slope/relief: source = the elevation layer inside the store (manifest derived_from), and
+    the full-grid recomputation must be bit-identical (same deterministic operator, same
+    float32 input → bit-identity is the hard criterion); land-sea mask (ice-surface
+    convention): source = the global ice-surface array (tiles read directly, not a store
+    layer), likewise required to be bit-identical on recomputation. Plus physical value
+    ranges (slope∈[0°,90°], relief≥0, mask∈{0,1}, land-fraction interval). Raises KeyError
+    when the store lacks the elevation layer or the derived layer.
     """
     checks: list[dict] = []
     with xr.open_datatree(store_dir, engine="zarr", chunks={}) as tree:
@@ -313,10 +322,6 @@ def build_derived_fidelity_report(store_dir, layer_id: str, tiers: list[str]) ->
             loc = f"{tier}"
 
             if layer_id == "derived__landsea_mask":
-                # 掩膜冰面口径：重算链起点 = 全域 ice-surface 数组
-                # （surface 优先瓦片选择：冰区 62 位 bed_crosscheck surface +
-                # 无冰区 226 位源目录 surface）——非 store 高程层（裸地复合
-                # 口径，与掩膜口径不同）；store 掩膜不得循环引用。
                 surf30 = ice_surface_array(NATIVE_TIER)
                 if tier == NATIVE_TIER:
                     expect = landsea_threshold(surf30)
@@ -430,9 +435,9 @@ def write_fidelity_report(report: dict, reports_dir: str | Path) -> Path:
     json_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    if "integral_tolerance" in report:      # ETOPO 路径：积分量判据
+    if "integral_tolerance" in report:
         criterion = f"积分量判据 < {report['integral_tolerance']:g} 相对偏差"
-    else:                                   # 派生层路径：与源层逐位一致
+    else:
         criterion = f"与源层 {report.get('source_layer', '?')} 逐位一致 + 值域硬判据"
     lines = [
         f"# 保真验证报告 — {layer}",
@@ -444,7 +449,7 @@ def write_fidelity_report(report: dict, reports_dir: str | Path) -> Path:
         "|---|---|---|",
     ]
     for c in report["checks"]:
-        if "summary" in c:          # 派生层/检查项自带预格式化摘要
+        if "summary" in c:
             detail = c["summary"]
         elif "rel_dev" in c:
             detail = f"积分量相对偏差 {c['rel_dev']:.3e}"

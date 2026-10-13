@@ -1,20 +1,27 @@
-"""测试：计数求和核 + 点 → 像元落格器（经度卷绕/极缘）+ 读取器
-契约 + 侧车导出器（GeoParquet 往返 / poles 合并）+ 计数守恒 + 侧车 ↔
-密度层互查。
+"""Tests: count-sum kernel + point → cell binning (longitude wrapping / pole
+edge) + reader contracts + sidecar exporters (GeoParquet round-trip / poles
+merge) + count conservation + sidecar ↔ density-layer cross-check.
 
-判据只测外部行为（计数层保真判据 = 总和守恒）：
-- sum 核：块内求和精确、计数守恒、非整数倍显式失败；
-- 落格器：已知点精确落胞、GSRM 0..360 与 WSM ±180 两制同点同胞、
-  日期线卷绕（180 ≡ −180 → 列 0）、lat=90 极缘归最北胞、非有限/
-  出界坐标拒绝、bincount 与逐点循环加法两独立路径位级一致；
-- 读取器：形状契约（WSM 100842×40 / GSRM 22511×9）拒漂移、解析
-  失败行拒绝、poles 板块码 "NA" 不被 pandas 吞成 NaN；
-- 真实源基线（磁盘实证的契约化）：WSM 170 空坐标行（全 Xmi）可定位
-  100672；GSRM 三数 22511/18440/16681；主档密度总和守恒；
-- 侧车：WSM 全行保留 + 170 空几何；GSRM 22511 行 + poles 203 行
-  4 框架；
-- e2e：两密度层入 store（uint32 免掩膜、无 30″ 档）+ manifest
-  count_semantics + fidelity PASS + 侧车落格还原密度层（互查项）。
+Criteria test external behaviour only (count-layer fidelity criterion = sum
+conservation):
+- sum kernel: in-block sum exact, count conserved, non-integer factor fails
+  explicitly;
+- binning: known points land in the exact cell, GSRM 0..360 and WSM ±180
+  systems give the same cell for the same point, dateline wrapping
+  (180 ≡ −180 → column 0), lat=90 pole edge goes to the northernmost cell,
+  non-finite / out-of-bounds coordinates rejected, bitwise agreement between
+  the two independent paths bincount and per-point loop accumulation;
+- readers: shape contracts (WSM 100842×40 / GSRM 22511×9) reject drift,
+  parse-failure rows rejected, poles plate code "NA" not swallowed to NaN by
+  pandas;
+- real-source baselines (on-disk evidenced contractualization): WSM 170
+  empty-coordinate rows (all Xmi) locatable 100672; GSRM three counts
+  22511/18440/16681; primary-tier density sum conserved;
+- sidecars: WSM all rows kept + 170 empty geometries; GSRM 22511 rows + poles
+  203 rows across 4 frames;
+- e2e: two density layers into store (uint32, no mask, no 30″ tier) + manifest
+  count_semantics + fidelity PASS + sidecar binning reproduces the density
+  layer (cross-check item).
 """
 
 from pathlib import Path
@@ -65,10 +72,9 @@ def _entry(layer_id=WSM_LAYER_ID, visibility="public"):
     )
 
 
-# ---------------- 计数求和核 ----------------
 
 def test_aggregate_sum_exact_and_conservation():
-    """块内求和精确 + 计数守恒（Σ粗 = Σ细）+ dtype uint32。"""
+    """In-block sum exact + count conservation (Σcoarse = Σfine) + dtype uint32."""
     data = np.array([[1, 2, 3, 4], [5, 6, 7, 8]], dtype=np.uint32)
     out = aggregate_sum(data, 2)
     assert out.tolist() == [[14, 22]]
@@ -82,7 +88,8 @@ def test_aggregate_sum_rejects_non_integer_factor():
 
 
 def test_aggregation_factor_integers_only():
-    """主档 3′ → 6′/30′/1° = 2/10/20；细于主档（30″）即显式失败。"""
+    """Primary tier 3′ → 6′/30′/1° = 2/10/20; finer than the primary tier (30″)
+    fails explicitly."""
     assert _aggregation_factor("6min") == 2
     assert _aggregation_factor("30min") == 10
     assert _aggregation_factor("1deg") == 20
@@ -90,10 +97,10 @@ def test_aggregation_factor_integers_only():
         _aggregation_factor("30sec")
 
 
-# ---------------- 点 → 像元落格器 ----------------
 
 def test_points_to_density_known_cells():
-    """1° 网格已知落胞：(0.3, 0.7) → 行 90 列 180；(−89.9, −179.9) → (0, 0)。"""
+    """Known 1° grid cells: (0.3, 0.7) → row 90 column 180; (−89.9, −179.9) →
+    (0, 0)."""
     grid = points_to_density([0.3, -89.9], [0.7, -179.9], "1deg")
     assert grid.dtype == np.uint32
     assert grid[90, 180] == 1
@@ -102,8 +109,9 @@ def test_points_to_density_known_cells():
 
 
 def test_points_to_density_lon_conventions():
-    """GSRM 0..360 制与 WSM ±180 制同点同胞（卷绕 238.327 ≡ −121.673
-    → 行 126 列 58）；经度 0 → 列 180。"""
+    """GSRM 0..360 and WSM ±180 systems give the same cell for the same point
+    (wrapping 238.327 ≡ −121.673 → row 126 column 58); longitude 0 → column
+    180."""
     a = points_to_density([36.914], [238.327], "1deg")
     b = points_to_density([36.914], [-121.673], "1deg")
     np.testing.assert_array_equal(a, b)
@@ -112,7 +120,8 @@ def test_points_to_density_lon_conventions():
 
 
 def test_points_to_density_dateline_and_pole_edge():
-    """日期线卷绕：lon=180 ≡ −180 → 列 0；lat=90 极缘归最北行。"""
+    """Dateline wrapping: lon=180 ≡ −180 → column 0; lat=90 pole edge goes to
+    the northernmost row."""
     grid = points_to_density([0.0, 90.0], [180.0, -180.0], "1deg")
     assert grid[90, 0] == 1
     assert grid[179, 0] == 1
@@ -137,11 +146,12 @@ def test_points_to_density_rejects_bad_inputs():
 
 
 def test_bincount_equals_loop_accumulation():
-    """独立路径位级比对：bincount 落格 vs 逐点循环加法——行/列数学、
-    卷绕与裁剪的正确性在两路径一致时才成立。"""
+    """Independent-path bitwise comparison: bincount binning vs per-point loop
+    accumulation — the row/column arithmetic, wrapping and clipping are correct
+    only where the two paths agree."""
     rng = np.random.default_rng(42)
     lat = rng.uniform(-90, 90, 2000)
-    lon = rng.uniform(-360, 360, 2000)      # 混合两种经度制
+    lon = rng.uniform(-360, 360, 2000)
     grid = points_to_density(lat, lon, "6min")
     nlat, nlon = grid.shape
     res = 1.0 / 10.0
@@ -152,10 +162,9 @@ def test_bincount_equals_loop_accumulation():
         c = min(int(np.floor((lo_w + 180.0) / res)), nlon - 1)
         direct[r, c] += 1
     np.testing.assert_array_equal(grid, direct)
-    assert int(grid.sum(dtype=np.uint64)) == 2000   # 构造性守恒
+    assert int(grid.sum(dtype=np.uint64)) == 2000
 
 
-# ---------------- 读取器契约 ----------------
 
 def test_load_wsm_missing_source(tmp_path):
     with pytest.raises(FileNotFoundError):
@@ -183,8 +192,9 @@ def test_load_gsrm_rejects_wrong_rows(tmp_path):
 
 
 def test_load_gsrm_rejects_parse_failure(tmp_path):
-    """缺字段行（8 token）逐行校验拒绝——keep_default_na=False 下 pandas
-    会静默补 ""，isna 检测不到，故 token 数是唯一可靠契约。"""
+    """Rows with a missing field (8 tokens) are rejected by per-row validation —
+    with keep_default_na=False pandas silently fills "", which isna cannot
+    detect, so the token count is the only reliable contract."""
     p = tmp_path / "GPS_ITRF08.gmt"
     p.write_text(
         _GPS_LINE * (GSRM_EXPECTED_ROWS - 1) + "1.0 0.0 0 0 0 0 0 AB\n",
@@ -195,7 +205,8 @@ def test_load_gsrm_rejects_parse_failure(tmp_path):
 
 
 def test_load_gsrm_poles_na_plate_preserved(tmp_path):
-    """合成 poles：板块码 "NA"（北美）不被 pandas 默认 na 值吞成 NaN。"""
+    """Synthetic poles: plate code "NA" (North America) not swallowed to NaN by
+    pandas' default na values."""
     for name in GSRM_POLES_NAMES:
         (tmp_path / name).write_text(
             "49.66 -78.08 0.285 NA\n0.0 10.0 0.5 EU\n", encoding="utf-8"
@@ -210,16 +221,16 @@ def test_load_gsrm_poles_na_plate_preserved(tmp_path):
 def test_load_gsrm_poles_rejects_parse_failure(tmp_path):
     for name in GSRM_POLES_NAMES:
         (tmp_path / name).write_text(
-            "49.66 -78.08 0.285 NA\n0.0 10.0\n", encoding="utf-8"  # 第 2 行缺字段
+            "49.66 -78.08 0.285 NA\n0.0 10.0\n", encoding="utf-8"
         )
     with pytest.raises(ValueError, match="非 4 字段"):
         load_gsrm_poles(tmp_path)
 
 
-# ---------------- 构建器（合成主档，核与装配链路） ----------------
 
 def test_builder_coarse_tier_from_home(monkeypatch):
-    """粗档 = 主档 sum 聚合（factor 20）+ attrs 模板（count_semantics）。"""
+    """Coarse tier = primary-tier sum aggregation (factor 20) + attrs template
+    (count_semantics)."""
     import cubebuild.points as points
 
     home = np.zeros((3600, 7200), dtype=np.uint32)
@@ -229,21 +240,20 @@ def test_builder_coarse_tier_from_home(monkeypatch):
     arr = points.build_wsm_density(_entry(), "1deg")
     vals = arr.compute().values
     assert vals.dtype == np.uint32
-    assert vals[0, 0] == 12                    # 3′ 行 0/1 → 1° 行 0
+    assert vals[0, 0] == 12
     assert int(vals.sum(dtype=np.uint64)) == 12
     assert arr.name == WSM_LAYER_ID
     assert "count_semantics" in arr.attrs
     assert arr.attrs["nodata_semantics"].startswith("0 = 无观测")
-    # 整型计数层 attrs 禁 missing_value/_FillValue
     assert "missing_value" not in arr.attrs and "_FillValue" not in arr.attrs
 
 
-# ---------------- 真实源基线（磁盘实证的契约化） ----------------
 
 @requires_wsm
 def test_wsm_source_baseline():
-    """WSM 基线：100842×40；170 空坐标行全 QUALITY=Xmi；可定位 100672；
-    主档密度总和 == 可定位数（计数守恒）。"""
+    """WSM baseline: 100842×40; 170 empty-coordinate rows all QUALITY=Xmi;
+    locatable 100672; primary-tier density sum == locatable count (count
+    conservation)."""
     df = load_wsm_points()
     assert df.shape == (WSM_EXPECTED_ROWS, 40)
     null = df[df["LAT"].isna() | df["LON"].isna()]
@@ -256,8 +266,9 @@ def test_wsm_source_baseline():
 
 @requires_gsrm
 def test_gsrm_source_baseline_three_numbers():
-    """GSRM 基线三数：22511 行 / 18440 唯一坐标 /
-    16681 唯一站码；经度 0..360 制；主档密度总和 == 22511。"""
+    """GSRM baseline three counts: 22511 rows / 18440 unique coordinates / 16681
+    unique site codes; longitude 0..360 system; primary-tier density sum ==
+    22511."""
     df = load_gsrm_gps()
     assert len(df) == GSRM_EXPECTED_ROWS
     assert df["lon"].between(0, 360).all()
@@ -267,7 +278,6 @@ def test_gsrm_source_baseline_three_numbers():
     assert int(home.sum(dtype=np.uint64)) == GSRM_EXPECTED_ROWS
 
 
-# ---------------- 侧车导出器 ----------------
 
 def test_export_sidecars_missing_source(tmp_path):
     from cubebuild.sidecars import export_gsrm_velocities, export_wsm_points
@@ -280,7 +290,8 @@ def test_export_sidecars_missing_source(tmp_path):
 
 @requires_wsm
 def test_export_wsm_sidecar_roundtrip(tmp_path):
-    """WSM 侧车：全 100842 行 + 40 属性列 + 170 空几何 + 应力字段齐全。"""
+    """WSM sidecar: all 100842 rows + 40 attribute columns + 170 empty
+    geometries + complete stress fields."""
     import geopandas as gpd
 
     from cubebuild.sidecars import export_wsm_points
@@ -293,21 +304,19 @@ def test_export_wsm_sidecar_roundtrip(tmp_path):
     back = gpd.read_parquet(tmp_path / "wsm2025_points.parquet")
     assert len(back) == WSM_EXPECTED_ROWS
     assert back.crs.to_epsg() == 4326
-    # 40 属性列全保留（应力方向/机制/质量分级验收项）+ geometry
     for col in ("AZI", "TYPE", "QUALITY", "REGIME", "S1AZ", "S1PL",
                 "DEPTH", "SITE"):
         assert col in back.columns
     assert len(back.columns) == 41                       # 40 + geometry
     n_null_geom = int(back.geometry.isna().sum())
     assert n_null_geom == WSM_EXPECTED_ROWS - WSM_EXPECTED_LOCATABLE
-    # 空几何行即空坐标行（QUALITY=Xmi）
     assert (back.loc[back.geometry.isna(), "QUALITY"] == "Xmi").all()
 
 
 @requires_gsrm
 def test_export_gsrm_sidecar_roundtrip(tmp_path):
-    """GSRM 侧车：22511 行（lon 原值 0..360 + lon_180 + 几何）+ poles
-    203 行 4 框架 + NA 板块码保留；visibility=internal。"""
+    """GSRM sidecar: 22511 rows (raw lon 0..360 + lon_180 + geometry) + poles
+    203 rows across 4 frames + NA plate code preserved; visibility=internal."""
     import geopandas as gpd
 
     from cubebuild.sidecars import export_gsrm_velocities
@@ -323,7 +332,6 @@ def test_export_gsrm_sidecar_roundtrip(tmp_path):
     )
     assert len(back) == GSRM_EXPECTED_ROWS
     assert back.crs.to_epsg() == 4326
-    # psvelo 9 列原值 + lon_180 卷绕列 + geometry（首行实测 238.327 → −121.673）
     assert list(back.columns[:9]) == [
         "lon", "lat", "ve", "vn", "se", "sn", "corr", "site", "study"
     ]
@@ -339,7 +347,6 @@ def test_export_gsrm_sidecar_roundtrip(tmp_path):
     assert (poles["plate"] == "NA").any() and not poles["plate"].isna().any()
 
 
-# ---------------- e2e：两密度层 + 两侧车全链路 ----------------
 
 _MINI = """
 version: test
@@ -373,9 +380,10 @@ layers:
 @requires_wsm
 @requires_gsrm
 def test_point_density_e2e(tmp_path, monkeypatch):
-    """uint32 密度层全链路：build → 结构验证 PASS → manifest
-    （dtype/count_semantics/visibility/侧车）→ 保真 PASS（逐位/跨档/
-    计数守恒）→ 侧车落格还原密度层（互查项）。"""
+    """uint32 density-layer full chain: build → structural validation PASS →
+    manifest (dtype / count_semantics / visibility / sidecars) → fidelity PASS
+    (bitwise / cross-tier / count conservation) → sidecar binning reproduces the
+    density layer (cross-check item)."""
     import cubebuild.cli
     import geopandas as gpd
     import xarray as xr
@@ -407,8 +415,8 @@ def test_point_density_e2e(tmp_path, monkeypatch):
         assert e["dtype"] == "uint32"
         assert e["visibility"] == vis
         assert e["resampling"] == "sum"
-        assert "count_semantics" in e          # 三数/计数基准注记（验收项）
-        assert "validity_mask" not in e        # 免掩膜
+        assert "count_semantics" in e
+        assert "validity_mask" not in e
         assert e["coverage"] == {"1deg": 1.0, "6min": 1.0, "3min": 1.0}
     assert "100672" in entries[WSM_LAYER_ID]["count_semantics"]
     assert "22511" in entries[GSRM_LAYER_ID]["count_semantics"]
@@ -419,7 +427,6 @@ def test_point_density_e2e(tmp_path, monkeypatch):
     ]
     assert manifest["sidecars"][1]["visibility"] == "internal"
 
-    # 保真：逐位一致 + 跨档 sum 一致 + 计数守恒 + dtype/值域（+ GSRM 三数）
     for eid in (WSM_LAYER_ID, GSRM_LAYER_ID):
         report = build_point_density_fidelity_report(out, eid, ["1deg", "6min", "3min"])
         assert report["result"] == "PASS", report["checks"]
@@ -427,7 +434,6 @@ def test_point_density_e2e(tmp_path, monkeypatch):
         expect_hard = 3 * 3 + 2 + (1 if eid == GSRM_LAYER_ID else 0)
         assert n_hard == expect_hard
 
-    # 互查：侧车点按坐标落像元 == 密度层 3′ 档逐位
     with xr.open_datatree(out, engine="zarr", chunks={}) as dt:
         wsm_store = dt[f"/{HOME_TIER}"].ds[WSM_LAYER_ID].values
         gsrm_store = dt[f"/{HOME_TIER}"].ds[GSRM_LAYER_ID].values
