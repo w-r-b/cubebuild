@@ -1,11 +1,11 @@
-"""构建入口。
+"""Build entry point.
 
-用法（geo_dl_clean_wsl 环境）：
+Usage (geo_dl_clean_wsl environment):
   ~/miniforge3/envs/geo_dl_clean_wsl/bin/python -m cubebuild build \\
       --mapping cubebuild/layer-mapping-v0.yaml \\
       --out products/cube-v1.0.zarr --reports products/reports
-  python -m cubebuild validate --store products/cube-v1.0.zarr --mapping <同上>
-  python -m cubebuild integrate --store products/cube-v1.0.zarr --mapping <同上>
+  python -m cubebuild validate --store products/cube-v1.0.zarr --mapping <same as above>
+  python -m cubebuild integrate --store products/cube-v1.0.zarr --mapping <same as above>
   python -m cubebuild export-public --store products/cube-v1.0.zarr [--dry-run]
   python -m cubebuild checksum --store products/cube-v1.0.zarr
 """
@@ -68,13 +68,10 @@ DEFAULT_OUT = REPO_ROOT / "products/cube-v1.0.zarr"
 DEFAULT_REPORTS = REPO_ROOT / "products/reports"
 DEFAULT_SIDECARS = REPO_ROOT / "products/sidecars"
 
-# 非档位本节点层的组路由（3D 地震 / 4D 古高程）：
-# 层 id → 档位子节点名（store 内 /{tier}/{group}）
 LAYER_GROUP_OF = {**SEISMIC_3D_GROUP_OF, **PALEO_4D_GROUP_OF}
 
 
 def cmd_build(args) -> int:
-    # 1. 契约加载 + 铁律前置校验（违规即失败并指明违规层）
     contract = load_contract(args.mapping)
     try:
         validate_contract(contract)
@@ -89,9 +86,7 @@ def cmd_build(args) -> int:
     )
     print("[铁律] 前置校验通过：无层进入细于原生分辨率的档；1° 全集档齐备")
 
-    # 2. 逐层构建（已登记构建器的层；源未集齐的层跳过并记 pending）
     tier_datasets: dict[str, dict] = {t: {} for t in contract.tiers}
-    # 3D 层组：深度坐标互不相同的模型层入档位子节点
     group_datasets: dict[tuple[str, str], dict] = {}
     built_entries, pending = [], []
     for entry in contract.layers:
@@ -108,7 +103,6 @@ def cmd_build(args) -> int:
                 else:
                     bucket = tier_datasets[tier]
                 bucket[entry.id] = arr
-                # 有效性掩膜伴生层：契约 mask 含 validity 即生成
                 if needs_validity_mask(entry.mask):
                     bucket[validity_layer_name(entry.id)] = (
                         build_validity_mask(arr, entry)
@@ -120,7 +114,6 @@ def cmd_build(args) -> int:
                 tier_datasets[tier].pop(entry.id, None)
                 tier_datasets[tier].pop(validity_layer_name(entry.id), None)
                 if group is not None:
-                    # 逐层清理（不动兄弟层：组内其余成员可能已成功入桶）
                     bucket = group_datasets.get((tier, group))
                     if bucket is not None:
                         bucket.pop(entry.id, None)
@@ -133,7 +126,6 @@ def cmd_build(args) -> int:
         "当前 store 仅含已实现层"
     )
 
-    # 3. 写 store（3D 层组为档位子节点：/1deg/gladm35、/1deg/semucb）
     datasets = {t: xr.Dataset(dict(vars_)) for t, vars_ in tier_datasets.items()}
     groups = {
         key: xr.Dataset(dict(vars_)) for key, vars_ in group_datasets.items()
@@ -142,7 +134,6 @@ def cmd_build(args) -> int:
     store_dir = write_store(tree, args.out)
     print(f"[写入] {store_dir}")
 
-    # 3.5 矢量侧车导出（逐侧车调用，源缺失跳过记 pending）
     sidecar_records: list[dict] = []
     sidecar_pending: list[str] = []
     for sid, exporter in SIDECARS.items():
@@ -154,7 +145,6 @@ def cmd_build(args) -> int:
     for rec in sidecar_records:
         print(f"[侧车] {rec['id']} → {rec['path']}（{rec['format']}）")
 
-    # 3.6 Slab2 合并回报（重叠像元总量写入构建回报；合并已缓存）
     if any(e.id in SLAB2_LAYERS for e in built_entries):
         merge_path = write_slab2_merge_report(args.reports)
         st = merge_slab2()["stats"]
@@ -164,8 +154,6 @@ def cmd_build(args) -> int:
             f"→ {merge_path.name}"
         )
 
-    # 3.7 LITHO1.0 变量清单回报（nc 其余变量清单写入构建回报，
-    #     v1.1 展开依据；确定性无时间戳）
     if any(e.id == LITHO1_LAB_ID for e in built_entries):
         inv_path = write_litho1_inventory_report(args.reports)
         inv = json.loads(inv_path.read_text(encoding="utf-8"))
@@ -174,17 +162,14 @@ def cmd_build(args) -> int:
             f"v1.1 候选 {inv['n_v1_1_candidates']}）→ {inv_path.name}"
         )
 
-    # 4. 覆盖率（单遍读取）+ cube_manifest
     coverage: dict[tuple[str, str], float] = {}
-    layer_extras: dict[str, dict] = {}   # 构建器补充溯源字段（doi/composite_rule 等）
+    layer_extras: dict[str, dict] = {}
     with xr.open_datatree(store_dir, engine="zarr", chunks={}) as dt:
         for entry in built_entries:
             group = LAYER_GROUP_OF.get(entry.id)
             for tier in entry.tiers:
                 node = dt[f"/{tier}/{group}"] if group is not None else dt[f"/{tier}"]
                 arr = node[entry.id]
-                # 缺测判定按层 dtype 与契约：浮点 NaN；整型类别层仅在
-                # 契约要求 validity 时 0=缺测（landsea 0=海为真实类）
                 zero_missing = needs_validity_mask(entry.mask)
                 missing = data_missing(arr, zero_is_missing=zero_missing)
                 cov = 1.0 - (missing.sum(dtype="float64") / arr.size).compute().item()
@@ -208,7 +193,6 @@ def cmd_build(args) -> int:
         f"{len(sidecar_records)} 侧车；覆盖率 {cov_str}"
     )
 
-    # 5. 结构验证 + 报告
     report = validate_store(store_dir, contract)
     report_path = write_report(report, args.reports)
     print(
@@ -216,7 +200,6 @@ def cmd_build(args) -> int:
         f"（{report['passed']}/{report['total_checks']} 项通过）→ {report_path}"
     )
 
-    # 6. 构建摘要
     summary = {
         "built": [e.id for e in built_entries],
         "pending": pending,
@@ -251,14 +234,15 @@ def cmd_validate(args) -> int:
 
 
 def cmd_fidelity(args) -> int:
-    """保真验证：ETOPO 走源统计 harness，派生层走高程层一致性，重磁组走
-    本层自供源统计 + 逐位重算/积分判据（各层自供报告器）。"""
+    """Fidelity verification: ETOPO goes through the source-stats harness, derived
+    layers through elevation-layer consistency, and the gravity/magnetics group
+    through per-layer self-supplied source stats + bit-level recomputation/integral
+    criteria (each layer supplies its own reporter)."""
     contract = load_contract(args.mapping)
     entry = next((e for e in contract.layers if e.id == args.layer), None)
     if entry is None:
         print(f"[保真] 契约中无层 {args.layer}", file=sys.stderr)
         return 2
-    # 源目录缺省按层解析（--src-dir 显式给出时优先）
     src_dir = args.src_dir
     try:
         if entry.id in DERIVED_FIDELITY_LAYERS:
@@ -279,12 +263,10 @@ def cmd_fidelity(args) -> int:
                 src_dir or VECTOR_FIDELITY_LAYERS[entry.id]["src_dir"],
             )
         elif entry.id in FAULT_FIDELITY_LAYERS:
-            # 断层双通道：单源单文件，源路径由常量解析（src_dir 忽略）
             report = build_faults_fidelity_report(
                 args.store, args.layer, list(entry.tiers), src_dir
             )
         elif entry.id in PB2002_FIDELITY_LAYERS:
-            # PB2002 三通道：单源单文件，源路径由常量解析（src_dir 忽略）
             report = build_pb2002_fidelity_report(
                 args.store, args.layer, list(entry.tiers), src_dir
             )
@@ -294,13 +276,10 @@ def cmd_fidelity(args) -> int:
                 src_dir or POINT_DENSITY_LAYERS[entry.id]["src_dir"],
             )
         elif entry.id in STRAIN_LAYERS:
-            # GSRM 应变四层：单源单文件，源路径由常量解析（src_dir 忽略）
             report = build_gsrm_strain_fidelity_report(
                 args.store, entry.id, list(entry.tiers)
             )
         elif entry.id in THERMAL_LAYERS:
-            # 热流两层：密度层（双源）src_dir 缺省交报告器解析，
-            # HFgrid14 = 其 SI-S01 目录
             default_src = (
                 None if THERMAL_LAYERS[entry.id]["kind"] == "density"
                 else THERMAL_LAYERS[entry.id]["src_dir"]
@@ -309,32 +288,26 @@ def cmd_fidelity(args) -> int:
                 args.store, entry.id, list(entry.tiers), src_dir or default_src
             )
         elif entry.id in SEISMIC_LAYERS:
-            # 3D 地震层：单源单文件，源路径由常量解析（src_dir 忽略）
             report = build_seismic_fidelity_report(
                 args.store, entry.id, list(entry.tiers)
             )
         elif entry.id in PALEO_LAYERS:
-            # 4D 古高程层：两档各随其官方产品目录（src_dir 忽略）
             report = build_paleo_fidelity_report(
                 args.store, entry.id, list(entry.tiers)
             )
         elif entry.id in SLAB2_LAYERS:
-            # Slab2 六层：合并基准档派生，源路径由常量解析（src_dir 忽略）
             report = build_slab2_fidelity_report(
                 args.store, entry.id, list(entry.tiers)
             )
         elif entry.id in LANDCAT_FIDELITY_LAYERS:
-            # 陆域类别四层：单源单文件，源路径由常量解析（src_dir 忽略）
             report = build_landcat_fidelity_report(
                 args.store, args.layer, list(entry.tiers)
             )
         elif entry.id in LITHO_FIDELITY_LAYERS:
-            # 岩石圈栅格五层：三源常量解析（src_dir 忽略）
             report = build_litho_fidelity_report(
                 args.store, args.layer, list(entry.tiers)
             )
         elif entry.id in SEDIMENT_FIDELITY_LAYERS:
-            # 沉积组三层：GST1 + Global Basins，源路径由常量解析
             report = build_sediment_fidelity_report(
                 args.store, args.layer, list(entry.tiers)
             )
@@ -371,8 +344,9 @@ def cmd_checksum(args) -> int:
 
 
 def cmd_integrate(args) -> int:
-    """集成验证总验收单：全量结构验证 + 保真汇总 + 构建回报四项
-    + 物理交叉四组（只报告不拦截）。"""
+    """Integration-verification master acceptance sheet: full structure validation +
+    fidelity summary + the four build-obligation items + the four physical cross-check
+    groups (report only, never block)."""
     contract = load_contract(args.mapping)
     try:
         validate_contract(contract)
@@ -397,10 +371,11 @@ def cmd_integrate(args) -> int:
 
 
 def cmd_export_public(args) -> int:
-    """公开版导出：按 visibility 与许可证状态剥离 internal 与退出项，
-    产出公开版候选（store + 侧车 + manifest 缺口注记 + 独立结构验证 +
-    体积核实与打包建议）。许可证状态门禁已停用（剥离以契约 visibility
-    为准），--t1-state 缺省空置分支。"""
+    """Public-version export: strip internal and opted-out items by visibility and
+    license status, producing a public-version candidate (store + sidecars + manifest
+    gap notes + independent structure validation + size verification and packaging
+    recommendation). The license-status gate is disabled (stripping goes by contract
+    visibility); the --t1-state default is the empty branch."""
     contract = load_contract(args.mapping)
     try:
         validate_contract(contract)

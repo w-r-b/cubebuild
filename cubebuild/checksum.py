@@ -1,8 +1,10 @@
-"""确定性校验：对 store 中每个数组按固定顺序计算 sha256。
+"""Deterministic verification: compute sha256 for every array in the store in a fixed order.
 
-用于「两次运行产物数值一致」验收：逐数组按 C 序分块读取后哈希，
-两次构建的 checksum 集合完全相等即数值确定。
-（覆盖任意维数组：首轴按行片读取，字节序与整展平一致。）
+Used for the "two runs produce numerically identical artifacts" acceptance test:
+each array is read in C-order chunks and then hashed; the two builds are
+numerically deterministic iff their checksum sets are exactly equal.
+(Covers arrays of any dimensionality: the first axis is read as row slabs, so the
+byte order matches a full C-order flatten.)
 """
 
 import hashlib
@@ -16,7 +18,7 @@ _SLAB_ROWS = 1024
 
 
 def _array_checksum(arr: zarr.Array) -> str:
-    """首轴行片流式哈希（1D/2D/3D/4D 通用；字节序 = C 序整展平）。"""
+    """Streaming hash over first-axis row slabs (works for 1D/2D/3D/4D; byte order = full C-order flatten)."""
     h = hashlib.sha256()
     if arr.ndim == 0:
         h.update(np.ascontiguousarray(arr[...]).tobytes())
@@ -28,13 +30,12 @@ def _array_checksum(arr: zarr.Array) -> str:
 
 
 def store_checksums(store_dir: str | Path) -> dict[str, str]:
-    """{数组路径: sha256}，键排序后 JSON 序列化亦确定。"""
+    """{array path: sha256}; JSON serialization is also deterministic once keys are sorted."""
     store_dir = Path(store_dir)
     root = zarr.open(store_dir, mode="r")
 
     def _walk(group, prefix):
         out = {}
-        # zarr v3 Group 用 members()（(name, node) 迭代器）；v2 用 items()
         members = group.members() if hasattr(group, "members") else group.items()
         for name, item in sorted(members):
             path = f"{prefix}/{name}"

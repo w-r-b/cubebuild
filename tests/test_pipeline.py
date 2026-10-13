@@ -1,6 +1,8 @@
-"""端到端管线测试（外部行为：出口产物对照 YAML 契约）。
+"""End-to-end pipeline test (external behaviour: output artifacts against the
+YAML contract).
 
-用缩减档位契约（1deg/30min/6min）跑全链路，30″ 全档由验收构建承担。
+Runs the full chain with a reduced-tier contract (1deg/30min/6min); the full 30″
+track is handled by the acceptance build.
 """
 
 import json
@@ -15,7 +17,6 @@ from cubebuild.cli import main
 from cubebuild.manifest import read_manifest
 from cubebuild.grids import tier_centers
 
-# 缩减档位契约：骨架管线全链路（铁律结构同真实契约）
 _CONTRACT = """
 version: test
 status: test
@@ -43,8 +44,10 @@ def mini_mapping(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_sidecars(monkeypatch):
-    """管线测试不导出矢量侧车（起构建入口会导出注册侧车，
-    其中 limw .gdb 原样传递达 1.2G——侧车导出由 test_vector 与真实构建覆盖）。"""
+    """Pipeline tests do not export vector sidecars (invoking the build entry
+    point would export the registered sidecars, among which the limw .gdb is
+    passed through verbatim at 1.2G — sidecar export is covered by test_vector
+    and the real build)."""
     import cubebuild.cli
 
     monkeypatch.setattr(cubebuild.cli, "SIDECARS", {})
@@ -61,7 +64,6 @@ def test_build_skeleton_e2e(tmp_path, mini_mapping):
     rc, out, reports = _run_build(tmp_path, mini_mapping, "cube.zarr")
     assert rc == 0
 
-    # Datatree 入口按档读取
     dt = xr.open_datatree(out, engine="zarr")
     assert set(dt.children) >= {"1deg", "30min", "6min"}
     for tier in ("1deg", "30min", "6min"):
@@ -72,7 +74,6 @@ def test_build_skeleton_e2e(tmp_path, mini_mapping):
         np.testing.assert_array_equal(arr["lat"].values, exp_lat)
         np.testing.assert_array_equal(arr["lon"].values, exp_lon)
 
-    # store 根有 manifest，且条目字段齐备
     manifest = read_manifest(out)
     entry = manifest["layers"][0]
     assert entry["id"] == "derived__pixel_area"
@@ -84,11 +85,9 @@ def test_build_skeleton_e2e(tmp_path, mini_mapping):
     assert "逐档精确计算" in entry["source"]
     assert entry["coverage"] == {"1deg": 1.0, "30min": 1.0, "6min": 1.0}
 
-    # 验证报告 PASS
     report = json.loads((reports / "structure-validation.json").read_text())
     assert report["result"] == "PASS"
     assert report["failed"] == 0
-    # 构建摘要
     summary = json.loads((reports / "build-summary.json").read_text())
     assert summary["built"] == ["derived__pixel_area"]
 
@@ -99,7 +98,7 @@ def test_determinism_two_runs(tmp_path, mini_mapping):
     assert rc1 == rc2 == 0
     cs1 = store_checksums(out1)
     cs2 = store_checksums(out2)
-    assert cs1 and checksums_equal(cs1, cs2)  # 两次运行产物数值一致
+    assert cs1 and checksums_equal(cs1, cs2)
 
 
 def test_iron_rule_blocks_build(tmp_path):
@@ -122,8 +121,8 @@ layers:
     p.write_text(bad, encoding="utf-8")
     out = tmp_path / "bad.zarr"
     rc = main(["build", "--mapping", str(p), "--out", str(out), "--reports", str(tmp_path)])
-    assert rc == 2  # 铁律前置校验失败，构建即失败
-    assert not out.exists()  # 违规产物不落盘
+    assert rc == 2
+    assert not out.exists()
 
 
 def test_validate_subcommand(tmp_path, mini_mapping):

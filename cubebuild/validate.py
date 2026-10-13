@@ -1,9 +1,12 @@
-"""结构验证（立方出口单接缝）。
+"""Structural validation (the cube output's single seam).
 
-对照三方：Zarr store × cube_manifest × YAML 契约。
-范围：全部契约层逐条比对（层不在 manifest / store → FAIL，
-不静默跳过）+ manifest↔契约集合互检 + 1° 全集档完整性（含 3D/4D
-节点与 internal 层）+ 铁律复检 + 同档层配准 + pixel_area 解析公式核对。
+Checks three parties: the Zarr store × cube_manifest × YAML contract.
+Scope: every contract layer compared one by one (a layer absent from the
+manifest / store → FAIL,
+not silently skipped) + manifest↔contract set cross-check + 1° full-set tier
+integrity (including 3D/4D
+nodes and internal layers) + iron-rule recheck + same-tier layer registration +
+pixel_area analytic-formula check.
 """
 
 import json
@@ -20,7 +23,8 @@ from .pixel_area import EARTH_RADIUS_KM, pixel_area_rows
 
 
 def _tier_node(tree, tier):
-    """取档位节点；不存在返回 None（getitem 支持 '/1deg' 与 '1deg' 两种路径）。"""
+    """Get the tier node; return None if absent (getitem supports both the
+    '/1deg' and '1deg' path forms)."""
     try:
         return tree[tier]
     except KeyError:
@@ -28,12 +32,15 @@ def _tier_node(tree, tier):
 
 
 def _layer_node(tree, tier: str, manifest_entry: dict):
-    """取层所在节点：3D/4D 层组按 manifest datatree_node 解析
-    子节点，2D 层在档位节点本节点；不存在返回 None。
+    """Get the node containing the layer: 3D/4D layer groups are resolved to a
+    child node by the manifest datatree_node, 2D layers are on the tier node
+    itself; return None if absent.
 
-    datatree_node 两种形态：绝对路径（3D 地震，如 /1deg/gladm35，
-    单档层）或相对组名（4D 古高程，如 paleodem → /{tier}/paleodem，
-    多档层共用组名、各档各自解析）。
+    datatree_node has two forms: an absolute path (3D seismology, e.g.
+    /1deg/gladm35, a
+    single-tier layer) or a relative group name (4D paleo-elevation, e.g.
+    paleodem → /{tier}/paleodem,
+    a multi-tier layer sharing the group name, each tier resolved separately).
     """
     raw = manifest_entry.get("datatree_node")
     path = f"/{tier}" if raw is None else (raw if raw.startswith("/") else f"/{tier}/{raw}")
@@ -48,15 +55,14 @@ def _check(checks: list, name: str, ok: bool, detail: str = "") -> None:
 
 
 def validate_store(store_dir: str | Path, contract: Contract) -> dict:
-    """结构验证：返回报告 dict（result=PASS/FAIL）。"""
+    """Structural validation: returns a report dict (result=PASS/FAIL)."""
     checks: list[dict] = []
     store_dir = Path(store_dir)
 
-    # 1. store 可开 + 根 attrs（打开/manifest 读取失败也要出 FAIL 报告，不静默崩溃）
     try:
         tree_ctx = xr.open_datatree(store_dir, engine="zarr", chunks={})
         manifest = read_manifest(store_dir)
-    except Exception as e:  # noqa: BLE001 —— 任何打开失败都须落报告
+    except Exception as e:
         _fail = {
             "result": "FAIL",
             "store": str(store_dir),
@@ -85,7 +91,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
             f"cube_manifest 登记层数 = {len(manifest_layers)}",
         )
 
-        # manifest ↔ 契约集合互检（双向完备——缺层或多层都 FAIL）
         contract_ids = {e.id for e in contract.layers}
         missing_in_manifest = sorted(contract_ids - set(manifest_layers))
         extra_in_manifest = sorted(set(manifest_layers) - contract_ids)
@@ -98,8 +103,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
             f"（契约 {len(contract_ids)} 层 / manifest {len(manifest_layers)} 层）",
         )
 
-        # 1° 全集档完整性：全部契约层（含 3D/4D 节点与
-        # internal 层）在 1° 档齐汇——逐层解析节点并确认数组存在
         absent_1deg = []
         for entry in contract.layers:
             if entry.id not in manifest_layers:
@@ -115,7 +118,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
             "; ".join(absent_1deg) or f"{len(contract.layers)} 层全部在 1° 档",
         )
 
-        # 2. 逐层结构比对（manifest 条目 × store 实际 × YAML 契约）
         for entry in contract.layers:
             if entry.id not in manifest_layers:
                 _check(
@@ -124,10 +126,9 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                     False,
                     "层不在 cube_manifest（全量验证：缺层即 FAIL）",
                 )
-                continue  # 无 manifest 条目，逐档比对无从谈起
+                continue
             m = manifest_layers[entry.id]
 
-            # manifest 条目字段与 YAML 契约一致
             field_pairs = [
                 ("dims", list(entry.dims), m["dims"]),
                 ("dtype", entry.dtype, m["dtype"]),
@@ -147,7 +148,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                 "; ".join(bad),
             )
 
-            # store 内逐档比对
             for tier in entry.tiers:
                 loc = f"{entry.id}@{tier}"
                 node = _layer_node(tree, tier, m)
@@ -185,7 +185,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                     f"store={arr.shape} 期望 lat,lon={exp_shape}",
                 )
 
-                # 坐标配准：与档位中心坐标完全一致
                 exp_lat, exp_lon = tier_centers(tier)
                 _check(
                     checks,
@@ -197,7 +196,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                     "lat/lon 中心与档位网格定义一致（edge-aligned，中心偏移半档）",
                 )
 
-                # depth 维登记（深度坐标 + 单位 + 层数与 manifest 一致）
                 if "depth" in entry.dims:
                     dep = arr.coords["depth"]
                     dep_units = str(dep.attrs.get("units", ""))
@@ -219,7 +217,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                         f"层数={n_dep} manifest={m_dep}",
                     )
 
-                # time 维登记（Ma 标签 + 升序 + 片数与 manifest 一致）
                 if "time" in entry.dims:
                     t = arr.coords["time"]
                     t_units = str(t.attrs.get("units", ""))
@@ -239,7 +236,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                         f"首末 {t.values[0]:g}/{t.values[-1]:g} Ma",
                     )
 
-            # 有效性掩膜伴生检查（带 validity 的层自动受检）
             if needs_validity_mask(entry.mask):
                 mname = validity_layer_name(entry.id)
                 for tier in entry.tiers:
@@ -255,14 +251,11 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                     marr = node.ds[mname]
                     arr = node.ds[entry.id]
                     exp_shape = grid_shape(tier)
-                    # 3D 层：掩膜与数据层同 shape，末两维 = 档位网格
                     if len(entry.dims) == 2:
                         shape_ok = marr.shape == arr.shape == exp_shape
                     else:
                         shape_ok = marr.shape == arr.shape and arr.shape[-2:] == exp_shape
                     bad_vals = int(((marr != 0) & (marr != 1)).sum().compute())
-                    # 两通道一致性（硬判据）：缺测 ⟺ 掩膜 0
-                    # （浮点层缺测 = NaN；整型类别层缺测 = 0，入立方）
                     mismatch = int((data_missing(arr) != (marr == 0)).sum().compute())
                     _check(
                         checks,
@@ -277,7 +270,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                         f"不一致像元 {mismatch}（期望 0）",
                     )
 
-            # 覆盖率字段
             cov = m.get("coverage", {})
             cov_ok = set(cov) == set(entry.tiers) and all(
                 isinstance(v, (int, float)) and 0.0 <= v <= 1.0 for v in cov.values()
@@ -289,9 +281,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                 json.dumps(cov, ensure_ascii=False),
             )
 
-        # 3. 同档层严格配准（已构建层之间同 shape/同坐标）
-        #    3D 层组在档位子节点内独立检查：组内共享该模型 depth
-        #    坐标；与档位节点的配准由逐层坐标配准检查覆盖（lat/lon 同网格）。
         for tier in contract.tiers:
             tnode = _tier_node(tree, tier)
             if tnode is None:
@@ -318,7 +307,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                             detail = f"{ref[0]} 与 {name} 在 {node_name} 节点不配准"
                 _check(checks, f"{node_name}: 同节点层严格配准", reg_ok, detail or "同 shape/同坐标")
 
-    # 4. 铁律复检（对 manifest 登记的档位集合；判断与构建前置校验共用同一实现）
     iron_bad = []
     for m in manifest["layers"]:
         nd = parse_native_res_deg(m["native_res"])
@@ -334,14 +322,13 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
         "; ".join(iron_bad) or "无层进入细于原生分辨率的档",
     )
 
-    # 5. pixel_area 数值与解析公式一致（逐档：整列比对 + 全球面积守恒）
     pa = [e for e in contract.layers if e.id == "derived__pixel_area"]
     if pa and "derived__pixel_area" in manifest_layers:
         with xr.open_datatree(store_dir, engine="zarr", chunks={}) as tree:
             for tier in pa[0].tiers:
                 arr = tree[f"/{tier}"]["derived__pixel_area"]
                 expect = pixel_area_rows(tier).astype("float32")
-                col = arr.values[:, 0]  # 行向量在列上恒定，取首列即可逐行核对
+                col = arr.values[:, 0]
                 exact = bool(np.array_equal(col, expect))
                 _check(
                     checks,
@@ -349,7 +336,6 @@ def validate_store(store_dir: str | Path, contract: Contract) -> dict:
                     exact,
                     "首列逐行比对 float32 精确一致" if exact else "存在偏差",
                 )
-            # 全球面积守恒（各档合计 = 4πR²，float32 累计容差）
             target = 4.0 * np.pi * EARTH_RADIUS_KM**2
             for tier in pa[0].tiers:
                 arr = tree[f"/{tier}"]["derived__pixel_area"]

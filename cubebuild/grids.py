@@ -1,7 +1,8 @@
-"""全球档位网格定义。
+"""Global tier grid definitions.
 
-约定：EPSG:4326，网格边缘对齐 -180/-90 与 +180/+90（边缘为档位分辨率的整数倍），
-像元中心偏移半档（rasterio edge-aligned 约定）。
+Convention: EPSG:4326, grid edges aligned to -180/-90 and +180/+90 (edges are
+integer multiples of the tier resolution), pixel centers offset by half a tier
+(the rasterio edge-aligned convention).
 """
 
 from fractions import Fraction
@@ -10,7 +11,6 @@ import numpy as np
 
 TIER_ORDER = ("1deg", "30min", "6min", "3min", "30sec")
 
-# 档位分辨率（度），用 Fraction 精确表示，避免浮点累积误差
 _TIER_DEG_FRAC = {
     "1deg": Fraction(1),
     "30min": Fraction(1, 2),
@@ -19,7 +19,6 @@ _TIER_DEG_FRAC = {
     "30sec": Fraction(1, 120),
 }
 
-# 各档 Zarr 分块（lat, lon），后续各层统一沿用
 _TIER_CHUNKS = {
     "1deg": (180, 360),
     "30min": (360, 720),
@@ -30,17 +29,17 @@ _TIER_CHUNKS = {
 
 
 def tier_deg(tier: str) -> float:
-    """档位分辨率（度，浮点近似）。"""
+    """Tier resolution (degrees, floating-point approximation)."""
     return float(_TIER_DEG_FRAC[tier])
 
 
 def tier_fraction(tier: str) -> Fraction:
-    """档位分辨率（度，精确有理数）——保守核周期分解等精确算术用。"""
+    """Tier resolution (degrees, exact rational) — used for exact arithmetic such as conservative-kernel periodic decomposition."""
     return _TIER_DEG_FRAC[tier]
 
 
 def grid_shape(tier: str) -> tuple[int, int]:
-    """全球网格形状 (nlat, nlon)。"""
+    """Global grid shape (nlat, nlon)."""
     nlat = Fraction(180) / _TIER_DEG_FRAC[tier]
     nlon = Fraction(360) / _TIER_DEG_FRAC[tier]
     if nlat.denominator != 1 or nlon.denominator != 1:
@@ -49,7 +48,7 @@ def grid_shape(tier: str) -> tuple[int, int]:
 
 
 def tier_centers(tier: str) -> tuple[np.ndarray, np.ndarray]:
-    """档位全球网格的像元中心坐标 (lat, lon)，float64。"""
+    """Pixel-center coordinates (lat, lon) of the tier's global grid, float64."""
     nlat, nlon = grid_shape(tier)
     res = tier_deg(tier)
     lat = -90.0 + (np.arange(nlat, dtype=np.float64) + 0.5) * res
@@ -58,24 +57,24 @@ def tier_centers(tier: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def tier_edges_lat(tier: str) -> np.ndarray:
-    """档位全球网格的纬度边缘（nlat+1 个），用于面积解析公式。"""
+    """Latitude edges of the tier's global grid (nlat+1 of them), used for the analytic area formula."""
     nlat, _ = grid_shape(tier)
     res = tier_deg(tier)
     return -90.0 + np.arange(nlat + 1, dtype=np.float64) * res
 
 
 def tier_chunks(tier: str) -> tuple[int, int]:
-    """档位 Zarr 分块，保证不超过网格形状。"""
+    """Tier Zarr chunks, guaranteed not to exceed the grid shape."""
     clat, clon = _TIER_CHUNKS[tier]
     nlat, nlon = grid_shape(tier)
     return (min(clat, nlat), min(clon, nlon))
 
 
 def aggregation_factor(tier: str, home_tier: str) -> int:
-    """主档 → 目标档的整数聚合因子（非整数即显式失败）。
+    """Integer aggregation factor from the home tier to the target tier (a non-integer fails explicitly).
 
-    粗档 = 主档块内聚合（mode/sum 等整数倍核）的唯一因子来源
-    （vector / points 共用；热流点密度复用）。
+    The single factor source for coarse tiers = home-tier block aggregation (mode/sum etc.
+    integer-multiple kernels) (shared by vector / points; reused by heatflow point density).
     """
     f = tier_fraction(tier) / tier_fraction(home_tier)
     if f.denominator != 1:

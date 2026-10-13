@@ -1,41 +1,66 @@
-"""Slab2 俯冲板片几何：27 分区合并全球层 + 轴向 2θ strike 核应用。
+"""Slab2 subduction-slab geometry: 27-zone merged global layers + axial 2θ
+strike-kernel application.
 
-源几何（磁盘实证，135 个 grd = 27 分区 × 5 分量，逐盘核对）：
+Source geometry (verified on disk; 135 grids = 27 zones × 5 components, checked
+grid by grid):
 
-- 分区网格：GMT grd（xyz2grd COARDS netCDF），gridline 节点注册——
-  节点坐标即 -R 端点、步长均匀、全部落在步长整数倍格点上；
-  22 分区 0.05°，5 分区（hin/man/mue/pam/puy）0.02°（catalog 原记
-  "0.05°" 不实，已勘误）。五分量同分区共享同一 x/y 几何（逐区断言）。
-- 分量符号约定：dep 源为海平面下负值（构建期取负号 → 正值向下；
-  mue 含 61 个 z>0 海平面以上节点，最小 −2.67 km，如实保留并注记）；
-  dip ∈ [0,90]；str ∈ [0,360] 方位角（轴向数据：σ 与 σ+180° 同义，
-  读取期 mod 180 入 [0,180)）；thk/unc ∈ km 正值。
-- 有效性：dep 有效 ⊆ 其余四分量有效（9 分区在 fringe 有少量 dep 缺测
-  而其余分量有值的节点——以 dep 为合并键，这些节点不参与合并，量级
-  记入构建回报）；分区内 70–97% 节点为 NaN（板片窄带，区外即缺测）。
+- Zone grid: GMT grd (xyz2grd COARDS netCDF), gridline-node registration—
+  node coordinates are exactly the -R endpoints, uniform step, all falling on
+  integer multiples of the step;
+  22 zones 0.05°, 5 zones (hin/man/mue/pam/puy) 0.02° (the catalog previously
+  recorded
+  "0.05°" inaccurately, now corrected). The five components of a zone share the
+  same x/y geometry (asserted per zone).
+- Component sign conventions: dep is negative below sea level in the source
+  (the build applies a negative sign → positive downward;
+  mue contains 61 nodes with z>0 above sea level, minimum −2.67 km, kept
+  faithfully with a note);
+  dip ∈ [0,90]; str ∈ [0,360] azimuth (axial data: σ and σ+180° are synonymous,
+  taken mod 180 into [0,180) at read time); thk/unc ∈ km positive.
+- Validity: dep-valid ⊆ the other four components' validity (9 zones have a few
+  dep-missing nodes at the fringe where the other components have values—dep is
+  the merge key, those nodes do not participate in the merge, magnitude recorded
+  in the build report); within a zone 70–97% of nodes are NaN (the slab is a
+  narrow band, missing outside it).
 
-合并设计（合并处置全部落盘注记）：
+Merge design (all merge dispositions recorded to disk):
 
-- 合并基准 = 3′ 主档像元网格（0.05°；0.02 分区 → 3′ 为 2.5 分数倍，
-  保守核精确处理）。分区网格按 Voronoi 胞解释嵌入全球经度环
-  （纬度仅分区带，核支持区域源），逐分区过保守核到 3′。
-- 合并规则：3′ 像元上「dep 覆盖 ≥2 分区」为重叠；重叠像元取 depth
-  最浅分区全部五分量（逐分量整组取自同一分区，不跨分区混合）；
-  depth 并列（float32 位级相等）取分区码字典序靠前者——确定性。
-- overlap_mask：覆盖该像元的分区数（覆盖 = 该分区 dep 分量有效）。
-  3′ 档 = 逐分区覆盖计数；粗档 = 所含 3′ 子像元分区覆盖的并集基数
-  ——非块内朴素求和：朴素求和会把单一分区按其覆盖的子像元数重复
-  累计（1° 档可达数百），与「分区数」语义（≤27）冲突；集合论上
-  「分区胞域与粗像元相交 ⟺ 与其某个 3′ 子像元相交」恒成立，故
-  并集基数即分区胞域语义下的精确分区数（「求和」按分区轴求和
-  实现，注记于 count_semantics）。
-- 保真：① store 与核重算逐位一致（同码路径，位级）；② 3′ 档单分区
-  像元 store == 该分区保守场（逐位，合并正确性硬判据）；
-  ③ 逐分区积分恒等式 Σ v·W = Σ_nodes v·w_node（解析节点面积，独立
-  权重路径，捕获嵌入错位）；④ 粗档积分 vs 3′ 合并场解析像元面积；
-  ⑤ 值域硬判据；⑥ strike 附加：独立路径逐像元循环均值抽样复算
-  （标量级直算，不经 einsum/分块）+ 轴向 vs 360° 循环差异诊断
-  （报告制——360° 循环对偏 N-S 走向场塌向垂直方向，即经典反面教材）。
+- Merge basis = the 3′ home-tier cell grid (0.05°; a 0.02° zone → 3′ is a 2.5
+  fractional multiple,
+  handled exactly by the conservative kernel). Zone grids are embedded into the
+  global longitude ring under the Voronoi cell interpretation
+  (latitude only within the zone band, kernel-support region source), and each
+  zone passes through the conservative kernel to 3′.
+- Merge rule: on the 3′ cell, "dep covered by ≥2 zones" is an overlap; an
+  overlapping cell takes all five components of the shallowest-depth zone
+  (the whole group taken from the same zone, not mixed across zones);
+  for tied depth (float32 bit-level equal) the lexicographically smaller zone
+  code wins—deterministic.
+- overlap_mask: the number of zones covering that cell (covered = that zone's
+  dep component valid).
+  The 3′ tier = per-zone coverage count; coarse tiers = the union cardinality
+  of the zone coverage of the contained 3′ subcells
+  —not in-block naive summation: naive summation would count a single zone
+  repeatedly by its number of covered subcells (up to hundreds at the 1° tier),
+  conflicting with the "number of zones" semantics (≤27); set-theoretically,
+  "a zone cell domain intersects a coarse cell ⟺ it intersects one of its 3′
+  subcells" always holds, so
+  the union cardinality is the exact number of zones under the zone-cell-domain
+  semantics ("summation" is implemented as a sum along the zone axis,
+  noted in count_semantics).
+- Fidelity: ① store bit-for-bit consistent with the kernel recomputation (same
+  code path, bit-level); ② 3′ single-zone
+  cells store == that zone's conservative field (bit-for-bit, the hard merge
+  correctness criterion);
+  ③ per-zone integral identity Σ v·W = Σ_nodes v·w_node (analytic node area,
+  independent weight path, catching embedding misplacement); ④ coarse-tier
+  integral vs the 3′ merged field's analytic cell area;
+  ⑤ value-range hard criterion; ⑥ strike extra: independent-path per-cell
+  circular-mean sampling recomputation
+  (scalar-level direct computation, bypassing einsum/chunking) + axial vs 360°
+  circular difference diagnosis
+  (report-only—the 360° circular average, for a field biased toward N-S strike,
+  collapses toward the perpendicular direction, the classic cautionary example).
 """
 
 import json
@@ -61,17 +86,15 @@ SLAB2_DOI = "10.1126/science.aat4723"       # Hayes et al. 2018, Science
 SOURCE_URL = "https://www.sciencebase.gov/catalog/item/5aa1b00ee4b0b1c392e86467"
 
 COMPONENTS = ("dep", "dip", "str", "thk", "unc")
-HOME_TIER = "3min"                          # 合并基准档（0.05° = 步长上界分区）
-HOME_LON_RES = Fraction(1, 20)              # 3′ 合并场源经度分辨率
-HOME_LON_PHASE = Fraction(1, 40)            # 3′ 合并场中心相位（0.025°）
+HOME_TIER = "3min"
+HOME_LON_RES = Fraction(1, 20)
+HOME_LON_PHASE = Fraction(1, 40)
 
-# 27 分区码（磁盘枚举契约化：多/少一个分区即构建失败）
 SLAB2_ZONES = tuple(sorted((
     "alu", "cal", "cam", "car", "cas", "cot", "hal", "hel", "him", "hin",
     "izu", "ker", "kur", "mak", "man", "mue", "pam", "phi", "png", "puy",
     "ryu", "sam", "sco", "sol", "sul", "sum", "van",
 )))
-# 实测 0.02° 分区（磁盘实证；其余 22 分区 0.05°）
 ZONES_002 = frozenset({"hin", "man", "mue", "pam", "puy"})
 
 LAYER_OF_COMP = {
@@ -84,15 +107,13 @@ LAYER_OF_COMP = {
 COMP_OF_LAYER = {v: k for k, v in LAYER_OF_COMP.items()}
 OVERLAP_MASK_ID = "stress_kinematics__slab2_overlap_mask"
 
-# 值域硬判据（源值域磁盘实证 + 裕量；dep 下界容纳 mue 61 个海平面以上节点）
 VALUE_BOUNDS = {
-    "dep": (-3.0, 750.0),    # km，正值向下；实测 [-2.67, 701.16]
-    "dip": (0.0, 90.0),      # 实测 [0.009, 81.17]
-    "str": (0.0, 180.0),     # 轴向 [0,180)；源 0–360 mod 180 后
-    "thk": (0.0, 300.0),     # 实测 [15.0, 197.6]
-    "unc": (0.0, 100.0),     # 实测 [1.10, 63.95]
+    "dep": (-3.0, 750.0),
+    "dip": (0.0, 90.0),
+    "str": (0.0, 180.0),
+    "thk": (0.0, 300.0),
+    "unc": (0.0, 100.0),
 }
-# 分位数直方图几何 (lo, hi, bin_width)；str 轴向角分位数无意义，改报循环统计量
 HIST_SPEC = {
     "dep": (-10.0, 800.0, 0.5),
     "dip": (0.0, 90.0, 0.1),
@@ -138,27 +159,28 @@ _COUNT_SEMANTICS = (
 )
 
 
-# ---------------- 分区读取 ----------------
 
 @dataclass
 class Slab2Zone:
-    """单分区五分量网格（符号/轴向变换已施加）。"""
+    """A single zone's five-component grid (sign/axial transforms already
+    applied)."""
 
     code: str
-    lon_res: Fraction            # 1/20（0.05°）或 1/50（0.02°）
-    x: np.ndarray                # (nx,) f64 严格递增，步长整数倍格点
-    y: np.ndarray                # (ny,) f64 严格递增
-    values: dict                 # comp → (ny, nx) f32（dep 已取负、str 已 mod 180）
+    lon_res: Fraction
+    x: np.ndarray
+    y: np.ndarray
+    values: dict
     valid: dict                  # comp → (ny, nx) bool
 
     @property
     def lat_edges(self) -> np.ndarray:
-        """Voronoi 胞纬度边（节点 ± 半步长；分区远离极点，无钳制必要）。"""
+        """Voronoi cell latitude edges (node ± half step; zones are far from the
+        poles, so no clamping is needed)."""
         return _zone_lat_edges(self.y, self.lon_res)
 
 
 def _zone_lat_edges(y: np.ndarray, lon_res: Fraction) -> np.ndarray:
-    step = float(lon_res)     # 经纬同步步长（磁盘实证 dx=dy）
+    step = float(lon_res)
     edges = np.empty(len(y) + 1, dtype=np.float64)
     edges[:-1] = y - step / 2.0
     edges[-1] = y[-1] + step / 2.0
@@ -166,12 +188,16 @@ def _zone_lat_edges(y: np.ndarray, lon_res: Fraction) -> np.ndarray:
 
 
 def load_slab2_zone(code: str, src_dir: str | Path | None = None) -> Slab2Zone:
-    """读单分区 5 分量 grd → 规范化分区（几何契约 + 符号/轴向变换）。
+    """Read a single zone's 5-component grd → normalized zone (geometry
+    contract + sign/axial transforms).
 
-    契约断言：x/y 严格递增、步长均匀且为 0.05/0.02 且与分区分辨率清单一致、
-    坐标落在步长整数倍格点（gridline 注册自证）、五分量几何逐位同。
-    src_dir 缺省调用期解析（教训：默认参数定义期绑定常量，测试
-    monkeypatch 模块属性不影响默认值）。
+    Contract assertions: x/y strictly increasing, uniform step equal to 0.05/0.02
+    and consistent with the zone-resolution list, coordinates falling on integer
+    multiples of the step (gridline-registration self-verification), the five
+    components' geometries bit-identical.
+    src_dir is resolved at call time by default (lesson: a default parameter is
+    bound to a constant at definition time, so a test monkeypatching the module
+    attribute does not affect the default).
     """
     import netCDF4
 
@@ -198,7 +224,6 @@ def load_slab2_zone(code: str, src_dir: str | Path | None = None) -> Slab2Zone:
         if not (np.array_equal(raw[comp][0], x0) and np.array_equal(raw[comp][1], y0)):
             raise ValueError(f"{code}/{comp}: 分量几何与 dep 不一致（五分量须共享网格）")
 
-    # 步长与格点对齐（精确值自坐标导出；经纬同步为磁盘实证）
     dx, dy = np.diff(x0), np.diff(y0)
     if np.any(dx <= 0) or np.any(dy <= 0):
         raise ValueError(f"{code}: x/y 非严格递增")
@@ -219,7 +244,6 @@ def load_slab2_zone(code: str, src_dir: str | Path | None = None) -> Slab2Zone:
     if y0[0] - step / 2 < -90.0 or y0[-1] + step / 2 > 90.0:
         raise ValueError(f"{code}: 分区纬度带越界 [{y0[0]:g}, {y0[-1]:g}]")
 
-    # 符号/轴向变换：dep 取负（正值向下）；str mod 180（轴向化）
     values, valid = {}, {}
     for comp in COMPONENTS:
         z = raw[comp][2]
@@ -232,14 +256,16 @@ def load_slab2_zone(code: str, src_dir: str | Path | None = None) -> Slab2Zone:
     return Slab2Zone(code=code, lon_res=lon_res, x=x0, y=y0, values=values, valid=valid)
 
 
-# ---------------- 分区 → 3′ 合并基准档 ----------------
 
 def _embed_ring(zone: Slab2Zone, comp: str) -> tuple[np.ndarray, np.ndarray]:
-    """分区分量嵌入全球经度环（纬度仅分区带；核支持区域源）。
+    """Embed a zone component into the global longitude ring (latitude only
+    within the zone band; kernel-support region source).
 
-    列映射 col = ((x + 180) mod 360) / lon_res（环上无 ±180 重复列），
-    分区 x 跨度 < 360 → 映射列连续（可回绕日期线），断言后双段放置。
-    返回 (values (ny, ring_n) f32 区外 NaN, valid (ny, ring_n) bool)。
+    Column mapping col = ((x + 180) mod 360) / lon_res (no ±180 duplicate column
+    on the ring); a zone x span < 360 → the mapped columns are contiguous (may
+    wrap around the date line), placed in two segments after assertions.
+    Returns (values (ny, ring_n) f32 NaN outside the zone, valid (ny, ring_n)
+    bool).
     """
     ring_n = int(Fraction(360) / zone.lon_res)
     cols = (zone.x + 180.0) % 360.0 / float(zone.lon_res)
@@ -257,7 +283,7 @@ def _embed_ring(zone: Slab2Zone, comp: str) -> tuple[np.ndarray, np.ndarray]:
     if end <= ring_n:
         values[:, c0:end] = v
         valid[:, c0:end] = m
-    else:                                   # 日期线回绕：分两段
+    else:
         k = ring_n - c0
         values[:, c0:] = v[:, :k]
         valid[:, c0:] = m[:, :k]
@@ -267,40 +293,48 @@ def _embed_ring(zone: Slab2Zone, comp: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _kernel_for(comp: str):
-    """分量 → 降采样核（str 轴向 2θ 循环统计，其余保守平均）。"""
+    """Component → downsampling kernel (str: axial 2θ circular statistics; the
+    rest: conservative mean)."""
     return conservative_overlap_circular_axial if comp == "str" else conservative_overlap_mean
 
 
 def zone_home_field(zone: Slab2Zone, comp: str) -> tuple[np.ndarray, np.ndarray]:
-    """分区分量 → 3′ 合并基准档场（连续分量保守核 / str 轴向 2θ 循环核）。
+    """Zone component → 3′ merge-basis-tier field (conservative kernel for
+    continuous components / axial 2θ circular kernel for str).
 
-    返回 (values float32 (3600, 7200), W float64)——W 即分区覆盖权重，
-    合并覆盖判定（overlap_mask / 最浅 depth 选择）用 dep 分量的 W>0。
+    Returns (values float32 (3600, 7200), W float64)—W is the zone coverage
+    weight; merge coverage decisions (overlap_mask / shallowest-depth selection)
+    use the dep component's W>0.
     """
     values, valid = _embed_ring(zone, comp)
     return _kernel_for(comp)(values, valid, zone.lat_edges, zone.lon_res, tier_fraction(HOME_TIER))
 
 
-# ---------------- 全球合并（缓存） ----------------
 
 _MERGE_CACHE: dict[str, dict] = {}
 
 
 def _block_any(cov: np.ndarray, factor: int) -> np.ndarray:
-    """3′ 覆盖布尔场 → 粗档任覆盖布尔场（整数倍块）。"""
+    """3′ coverage boolean field → coarse-tier any-covered boolean field
+    (integer-multiple blocks)."""
     m, n = cov.shape
     return cov.reshape(m // factor, factor, n // factor, factor).any(axis=(1, 3))
 
 
 def merge_slab2(src_dir: str | Path | None = None) -> dict:
-    """27 分区 → 全球 3′ 合并场 + 逐档分区计数 + 重叠统计（进程内缓存）。
+    """27 zones → global 3′ merged field + per-tier zone count + overlap
+    statistics (in-process cache).
 
-    src_dir 缺省调用期解析 SLAB2_SRC_DIR（测试 monkeypatch 友好）。
+    src_dir is resolved to SLAB2_SRC_DIR at call time by default
+    (test-monkeypatch friendly).
 
-    返回 dict：
-      fields: comp → (3600, 7200) f32（板片区外 NaN；重叠取最浅 depth 分区）
-      counts: tier → uint8 分区覆盖数（3′ 逐分区计数，粗档并集基数）
-      stats:  重叠像元总量/分布/分区对重叠/并列次数/分区表（构建回报数据）
+    Returns dict:
+      fields: comp → (3600, 7200) f32 (NaN outside the slab region; overlaps take
+              the shallowest-depth zone)
+      counts: tier → uint8 zone coverage count (3′ per-zone count; coarse tiers
+              the union cardinality)
+      stats:  overlap total/distribution/zone-pair overlaps/tie count/zone table
+              (build-report data)
     """
     src_dir = SLAB2_SRC_DIR if src_dir is None else src_dir
     key = str(Path(src_dir).resolve())
@@ -312,12 +346,12 @@ def merge_slab2(src_dir: str | Path | None = None) -> dict:
     counts = {t: np.zeros(grid_shape(t), dtype=np.uint8) for t in ("3min", "6min", "30min", "1deg")}
     best_depth = np.full((nlat, nlon), np.inf, dtype=np.float64)
 
-    cov_indices: dict[str, np.ndarray] = {}     # 分区覆盖扁平索引（分区对重叠统计）
+    cov_indices: dict[str, np.ndarray] = {}
     pair = np.zeros((len(SLAB2_ZONES),) * 2, dtype=np.int64)
     zone_table = []
     n_ties = 0
 
-    for zi, code in enumerate(SLAB2_ZONES):     # 已排序：并列取字典序靠前者
+    for zi, code in enumerate(SLAB2_ZONES):
         zone = load_slab2_zone(code, src_dir)
         zf, w_dep = {}, None
         for comp in COMPONENTS:
@@ -347,13 +381,11 @@ def merge_slab2(src_dir: str | Path | None = None) -> dict:
             "code": code,
             "lon_res_deg": float(zone.lon_res),
             "dep_valid_nodes": int(zone.valid["dep"].sum()),
-            # dep 缺测而其余分量有效的节点（不入合并；dep ⊆ 其余分量，磁盘实证）
             "fringe_nodes_beyond_dep": int((zone.valid["dip"] & ~zone.valid["dep"]).sum()),
             "above_sea_level_nodes": int((zone.values["dep"] < 0).sum()),
             "covered_3min_pixels": int(idx.size),
         })
 
-    # 合并场一致性断言：dep 有限 ⟺ 覆盖 ≥1 分区；其余分量有限 ⊆ dep 有限
     covered = counts["3min"] > 0
     if not np.array_equal(np.isfinite(fields["dep"]), covered):
         raise AssertionError("合并场 dep 有限性与分区覆盖不一致")
@@ -368,7 +400,7 @@ def merge_slab2(src_dir: str | Path | None = None) -> dict:
         "zones": len(SLAB2_ZONES),
         "merge_tier": HOME_TIER,
         "covered_3min_pixels": n_cov,
-        "overlap_3min_pixels": n_overlap,       # 重叠像元总量
+        "overlap_3min_pixels": n_overlap,
         "overlap_share_of_coverage": n_overlap / n_cov,
         "count_distribution_3min": dist,
         "depth_tie_pixels": int(n_ties),
@@ -385,7 +417,8 @@ def merge_slab2(src_dir: str | Path | None = None) -> dict:
 
 
 def write_slab2_merge_report(reports_dir: str | Path, src_dir: str | Path | None = None) -> Path:
-    """合并回报落盘（重叠像元总量写入构建回报；确定性，无时间戳）。"""
+    """Write the merge report to disk (the overlap pixel total goes into the
+    build report; deterministic, no timestamp)."""
     stats = merge_slab2(src_dir)["stats"]
     path = Path(reports_dir) / "slab2-merge.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -393,16 +426,18 @@ def write_slab2_merge_report(reports_dir: str | Path, src_dir: str | Path | None
     return path
 
 
-# ---------------- 层构建 ----------------
 
 def _home_source(comp: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """3′ 合并场作为粗档保守核源（值/有效/纬度边，中心相位 0.025°）。"""
+    """The 3′ merged field as the coarse-tier conservative-kernel source
+    (values/valid/latitude edges, center phase 0.025°)."""
     values = merge_slab2()["fields"][comp]
     return values, np.isfinite(values), tier_edges_lat(HOME_TIER)
 
 
 def _tier_field(comp: str, tier: str) -> np.ndarray:
-    """分层数组：3′ 直出合并场；粗档自合并场保守核（str 走轴向核）。"""
+    """Per-tier array: 3′ emits the merged field directly; coarse tiers come
+    from the merged field via the conservative kernel (str uses the axial
+    kernel)."""
     if tier == HOME_TIER:
         return merge_slab2()["fields"][comp]
     src, valid, lat_edges = _home_source(comp)
@@ -434,7 +469,8 @@ def _common_attrs(entry: LayerEntry) -> dict:
 
 
 def build_slab2_data_layer(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建五分量数据层（stress_kinematics__slab2_{depth,dip,strike,thickness,uncertainty}）。"""
+    """Build the five-component data layers
+    (stress_kinematics__slab2_{depth,dip,strike,thickness,uncertainty})."""
     comp = COMP_OF_LAYER[entry.id]
     values = _tier_field(comp, tier)
     arr = da.from_array(values, chunks=tier_chunks(tier))
@@ -451,7 +487,8 @@ def build_slab2_data_layer(entry: LayerEntry, tier: str) -> xr.DataArray:
 
 
 def build_slab2_overlap_mask(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建 stress_kinematics__slab2_overlap_mask（uint8 分区覆盖数，免掩膜）。"""
+    """Build stress_kinematics__slab2_overlap_mask (uint8 zone coverage count,
+    mask-free)."""
     values = merge_slab2()["counts"][tier]
     arr = da.from_array(values, chunks=tier_chunks(tier))
     lat, lon = tier_centers(tier)
@@ -467,7 +504,6 @@ def build_slab2_overlap_mask(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
 SLAB2_LAYERS = {
     **{lid: {"kind": "data", "comp": c} for c, lid in LAYER_OF_COMP.items()},
@@ -476,14 +512,16 @@ SLAB2_LAYERS = {
 
 
 def _cell_areas_3min() -> np.ndarray:
-    """3′ 档解析像元行面积（km²）——粗档积分独立权重路径。"""
+    """3′ tier analytic cell row area (km²)—the independent weight path for
+    coarse-tier integrals."""
     edges = tier_edges_lat(HOME_TIER)
     dsin = np.sin(np.deg2rad(edges[1:])) - np.sin(np.deg2rad(edges[:-1]))
     return EARTH_RADIUS_KM**2 * dsin * float(HOME_LON_RES) * np.pi / 180.0
 
 
 def _node_areas(zone: Slab2Zone) -> np.ndarray:
-    """分区解析节点 Voronoi 行面积（km²）——分区积分独立权重路径。"""
+    """Zone analytic node Voronoi row area (km²)—the independent weight path
+    for zone integrals."""
     edges = zone.lat_edges
     dsin = np.sin(np.deg2rad(edges[1:])) - np.sin(np.deg2rad(edges[:-1]))
     return EARTH_RADIUS_KM**2 * dsin * float(zone.lon_res) * np.pi / 180.0
@@ -502,28 +540,32 @@ def _report(checks: list, name: str, summary: str, **extra) -> None:
 
 
 def _axial_independent_mean(theta: np.ndarray, w: np.ndarray) -> float:
-    """独立路径轴向循环均值（标量级直算，不经 einsum/分块）。"""
+    """Independent-path axial circular mean (scalar-level direct computation,
+    bypassing einsum/chunking)."""
     phi = np.deg2rad(2.0 * theta.astype(np.float64))
     return float(0.5 * np.degrees(np.arctan2(np.dot(w, np.sin(phi)), np.dot(w, np.cos(phi)))) % 180.0)
 
 
 def _independent_pixel_mean(zone: Slab2Zone, comp: str, i: int, j: int,
                             res: float = 0.05) -> float | None:
-    """strike 独立路径：单 3′ 像元内分区源节点标量级循环均值。
+    """strike independent path: scalar-level circular mean of the zone's source
+    nodes within a single 3′ cell.
 
-    节点选取 = Voronoi 胞（± 分区步长/2，非像元半宽——0.02 分区两者不同）
-    与像元正面积相交（经度在环坐标下处理 ±180 回绕：候选列含首尾各一格
-    延伸）；权重 = Δsin(纬) × Δlon(度)，与核权重相差常数因子（R²·π/180），
-    在 atan2 比值中消去。
+    Node selection = the Voronoi cell (± zone step/2, not the cell half-width—the
+    two differ for a 0.02° zone)
+    intersecting the cell's positive area (longitude handles the ±180 wrap in
+    ring coordinates: candidate columns include a one-cell extension at each
+    end); weight = Δsin(lat) × Δlon(deg), differing from the kernel weight by a
+    constant factor (R²·π/180),
+    which cancels in the atan2 ratio.
     """
     step = float(zone.lon_res)
     y0, y1 = -90.0 + i * res, -90.0 + (i + 1) * res
     rows = np.flatnonzero((zone.y + step / 2 > y0) & (zone.y - step / 2 < y1))
     if rows.size == 0:
         return None
-    # 环坐标（0..360，自 -180 起）：像元 j 与节点列均折算到此框架
     p0, p1 = j * res, (j + 1) * res
-    centers = (zone.x + 180.0) % 360.0          # 节点环坐标
+    centers = (zone.x + 180.0) % 360.0
     k_lo = int(np.floor((p0 - step / 2) / step)) - 1
     k_hi = int(np.ceil((p1 + step / 2) / step)) + 1
     wts, ths = [], []
@@ -535,7 +577,6 @@ def _independent_pixel_mean(zone: Slab2Zone, comp: str, i: int, j: int,
             ov = min(p1, c_hi) - max(p0, c_lo)
             if ov <= 0:
                 continue
-            # 环列 k 的分区源节点（k 可能越界一格：±360 回绕）
             col = np.flatnonzero(np.isclose(centers, k * step % 360.0, rtol=0.0, atol=1e-9))
             if col.size != 1:
                 continue
@@ -549,7 +590,8 @@ def _independent_pixel_mean(zone: Slab2Zone, comp: str, i: int, j: int,
 
 
 def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> dict:
-    """Slab2 层保真报告（数据层 ①–⑥ / strike 附加独立路径与循环诊断；计数层独立判据组）。"""
+    """Slab2 layer fidelity report (data layers ①–⑥ / strike extra independent
+    path and circular diagnosis; the count layer has its own criterion group)."""
     spec = SLAB2_LAYERS[layer_id]
     m = merge_slab2()
     checks: list[dict] = []
@@ -579,7 +621,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                 continue
 
             comp = spec["comp"]
-            # ① 同码重算逐位一致 + 有效通道一致性（NaN ⟺ W=0 / 覆盖）
             if tier == HOME_TIER:
                 expect = m["fields"][comp]
                 ok_mask = m["counts"]["3min"] > 0
@@ -596,16 +637,12 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
             _check(checks, f"{tier}: 有效位与核 W 复算一致（逐位）", mism == 0,
                    f"不一致 {mism} 像元（期望 0）")
 
-            # ② 值域硬判据
             lo, hi = VALUE_BOUNDS[comp]
             fin = store[np.isfinite(store)]
             _check(checks, f"{tier}: 值域 [{lo:g}, {hi:g}]{'' if comp != 'dep' else '（dep 下界容纳海平面以上 61 节点）'}",
                    bool(fin.size and fin.min() >= lo and fin.max() <= hi),
                    f"min {fin.min() if fin.size else float('nan'):.4g} / max {fin.max() if fin.size else float('nan'):.4g}")
 
-            # ③ 粗档积分守恒（vs 3′ 合并场解析像元面积，独立权重路径）
-            #    str 豁免：角度无积分不变量（循环统计不守恒线性和），其粗档
-            #    正确性由 ① 位级重算 + 3′ 分区一致性 + 单元解析用例覆盖
             if tier != HOME_TIER and comp != "str":
                 w = _cell_areas_3min()
                 src_vals = m["fields"][comp]
@@ -616,7 +653,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                 _check(checks, f"{tier}: 积分守恒（相对源偏差 < 0.1%）", rel < INTEGRAL_TOL,
                        f"相对偏差 {rel:.3e}", rel_dev=rel)
 
-            # ⑤ 分位数/循环统计量（报告制；粗档源 = 3′ 合并场，3′ 源 = 分区节点，见下）
             hist_spec = HIST_SPEC[comp]
             if hist_spec is not None:
                 if tier != HOME_TIER:
@@ -624,7 +660,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                     src_hist = hist_add(np.zeros(int(round((hhi - hlo) / bw)), dtype=np.uint64),
                                        src_vals[np.isfinite(src_vals)], lo=hlo, hi=hhi, bin_width=bw)
                     _quantile_report(checks, tier, comp, src_hist, fin, hist_spec)
-                # 3′ 档分位数在分区循环后对节点源报（源直方图在分区循环中累积）
             else:
                 phi = np.deg2rad(2.0 * fin.astype(np.float64))
                 r_bar = float(np.hypot(np.cos(phi).mean(), np.sin(phi).mean()))
@@ -635,7 +670,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
             _report(checks, f"{tier}: 覆盖率（报告制）",
                     f"档 {float(ok_mask.mean()):.4f} vs 3′ 合并场 {float((m['counts']['3min'] > 0).mean()):.4f}")
 
-        # ④ 3′ 分区源一致性（非重叠区与分区源一致）+ 分区积分 + strike 独立路径
         if spec["kind"] == "data":
             comp = spec["comp"]
             store = tree[f"/{HOME_TIER}"].ds[layer_id].values
@@ -652,7 +686,7 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                 zone = load_slab2_zone(code)
                 v, W = zone_home_field(zone, comp)
                 W_dep = W if comp == "dep" else zone_home_field(zone, "dep")[1]
-                sel = (W_dep > 0) & (count == 1)    # 恰被该分区覆盖 → 合并值须逐位等于分区场
+                sel = (W_dep > 0) & (count == 1)
                 if not sel.any():
                     continue
                 zone_checked += 1
@@ -675,7 +709,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                         src_hist = hist_add(src_hist, zone.values[comp][zone.valid[comp]],
                                             lo=hlo, hi=hhi, bin_width=bw)
                 else:
-                    # strike 独立路径：抽样单覆盖像元标量级循环均值（不经 einsum/分块）
                     sel_idx = np.flatnonzero(sel.ravel())
                     take = rng.choice(sel_idx, size=min(16, sel_idx.size), replace=False)
                     devs = []
@@ -702,7 +735,6 @@ def build_slab2_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> d
                 _quantile_report(checks, HOME_TIER, comp, src_hist, fin0, hist_spec,
                                  note="（源 = 分区节点直方图，显示保守重采样压缩）")
 
-        # strike 附加：轴向 vs 360° 循环差异诊断（正确性检查，报告制）
         if layer_id == LAYER_OF_COMP["str"]:
             for tier in tiers:
                 fin = tree[f"/{tier}"].ds[layer_id].values

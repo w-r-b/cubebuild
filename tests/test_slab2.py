@@ -1,7 +1,9 @@
-"""测试：轴向 2θ 核解析性质（边界跨越/轴向不变性/分数倍档/对消约定）+
-分区读取器契约（gridline 格点/步长/五分量几何/分辨率清单）+ 合并规则
-（最浅 depth/并列字典序/计数并集/区外 NaN，合成分区）+ 构建器 attrs +
-真实源 e2e（六层入 store、manifest 溯源、保真 PASS、合并回报落盘）。
+"""Tests: analytic properties of the axial 2θ kernel (boundary crossing / axial
+invariance / fractional tiers / cancellation convention) + zone reader contract
+(gridline lattice / step / five-component geometry / resolution list) + merge
+rules (shallowest depth / tie-break dictionary order / count union / NaN outside
+zones, synthetic zones) + builder attrs + real-source e2e (six layers into the
+store, manifest provenance, fidelity PASS, merge report written to disk).
 """
 
 from fractions import Fraction
@@ -20,10 +22,9 @@ requires_slab2 = pytest.mark.skipif(not REAL_SLAB2, reason="Slab2 源未集齐")
 THREE_MIN = Fraction(1, 20)
 
 
-# ---------------- 轴向 2θ 核（解析性质） ----------------
 
 def _ring_source(theta_cols, lat_edges=None, lon_res=Fraction(1, 20), valid_cols=None):
-    """构造整环单行源：theta_cols 为环列 0..n-1 的轴向角，None=NaN。"""
+    """Construct a full-ring single-row source: theta_cols maps ring columns 0..n-1 to axial angles, None means NaN."""
     n = int(Fraction(360) / lon_res)
     vals = np.full((1, n), np.nan, dtype=np.float32)
     mask = np.zeros((1, n), dtype=bool)
@@ -35,7 +36,7 @@ def _ring_source(theta_cols, lat_edges=None, lon_res=Fraction(1, 20), valid_cols
 
 
 def test_axial_constant_field_exact():
-    """常数轴向角：任意面积权下循环均值恒等于该角（位级）。"""
+    """Constant axial angle: under any area weighting the circular mean equals that angle (bit-exact)."""
     n = 7200
     vals = np.full((1, n), 77.5, dtype=np.float32)
     mask = np.ones((1, n), dtype=bool)
@@ -46,22 +47,20 @@ def test_axial_constant_field_exact():
 
 
 def test_axial_wrap_boundary_mean():
-    """跨 0/180 边界均值：{170,175,5,10} → ~1.45°（日期线界胞半权），朴素均值 90 为反面教材。"""
+    """Mean across the 0/180 boundary: {170,175,5,10} -> ~1.45° (date-line boundary cell half weight), with the naive mean of 90 as the counterexample."""
     vals, mask, le = _ring_source({0: 170.0, 1: 175.0, 2: 5.0, 3: 10.0})
     v, W = conservative_overlap_circular_axial(vals, mask, le, THREE_MIN, Fraction(1))
-    # 环列 0 胞 [-180.025,-179.975] 跨日期线：目标 1° 列 0 内仅半权 0.025，
-    # 列 1..3 全权 0.05 → 解析期望（手算）：
     c = 0.025 * np.cos(np.deg2rad(340)) + 0.05 * (
         np.cos(np.deg2rad(350)) + np.cos(np.deg2rad(10)) + np.cos(np.deg2rad(20)))
     s = 0.025 * np.sin(np.deg2rad(340)) + 0.05 * (
         np.sin(np.deg2rad(350)) + np.sin(np.deg2rad(10)) + np.sin(np.deg2rad(20)))
     expect = 0.5 * np.degrees(np.arctan2(s, c)) % 180.0
     assert v[90, 0] == pytest.approx(expect, abs=1e-5)
-    assert abs(v[90, 0]) < 2.0        # 轴向正确；朴素算术均值为 90（垂直方向，错）
+    assert abs(v[90, 0]) < 2.0
 
 
 def test_axial_invariance_plus_180():
-    """轴向不变性：θ 与 θ+180（如 33.25 与 213.25）→ 输出一致（float 末位内）。"""
+    """Axial invariance: θ and θ+180 (e.g. 33.25 and 213.25) -> the output is identical (within the float ulp)."""
     n = 7200
     va, _ = conservative_overlap_circular_axial(
         np.full((1, n), 33.25, dtype=np.float32), np.ones((1, n), dtype=bool),
@@ -74,7 +73,7 @@ def test_axial_invariance_plus_180():
 
 
 def test_axial_nan_outside_valid_and_w_matches():
-    """无有效源 → NaN；W 与保守核同权（几何完全共享）。"""
+    """No valid source -> NaN; W shares the same weights as the conservative kernel (the geometry is fully shared)."""
     n = 7200
     rng = np.random.default_rng(3)
     vals = rng.uniform(0, 180, size=(3, n)).astype(np.float32)
@@ -88,19 +87,21 @@ def test_axial_nan_outside_valid_and_w_matches():
 
 
 def test_axial_perpendicular_pair_deterministic():
-    """等权正交对（θ 与 θ+90，如 {0°, 90°}）：真实轴向均值无定义（双侧角
-    45/135 均可），浮点合成矢量为残差级——cos(0)+cos(180°)=0 精确相消，
-    sin 残差 1.22e-16 → atan2 择 π/2 → ½=45°。IEEE + numpy deg2rad 下
-    逐位确定（残差由常量函数值决定，非随机），核不崩溃不发散即受检。"""
+    """Equal-weight orthogonal pair (θ and θ+90, e.g. {0°, 90°}): the true axial
+    mean is undefined (either bisecting angle 45/135 is admissible); the float
+    resultant vector is residual-level -- cos(0)+cos(180°)=0 cancels exactly,
+    leaving a sin residual of 1.22e-16 -> atan2 chooses π/2 -> ½=45°. It is
+    bit-exact under IEEE + numpy deg2rad (the residual is determined by the
+    constant function value, not random); the kernel is checked to neither
+    crash nor diverge."""
     vals, mask, le = _ring_source({0: 0.0, 1: 90.0})
-    # 3′ 源 → 3′ 目标：目标列 0 由源列 0/1 各半权（0.025/0.025）——等权
     v, W = conservative_overlap_circular_axial(vals, mask, le, THREE_MIN, THREE_MIN)
     assert W[1800, 0] > 0
     assert v[1800, 0] == pytest.approx(45.0, abs=1e-6)
 
 
 def test_axial_fractional_002_source():
-    """0.02 分区（分数倍 2.5）→ 3′：常数场位级直出。"""
+    """0.02 zone (fractional multiple 2.5) -> 3′: a constant field comes out bit-exact."""
     lon_res = Fraction(1, 50)
     n = 18000
     vals = np.full((1, n), 15.0, dtype=np.float32)
@@ -111,7 +112,7 @@ def test_axial_fractional_002_source():
 
 
 def test_axial_weighted_two_value_closed_form():
-    """两值加权闭式（0.025/0.05 界胞权重）：30°/80° → ½·atan2(Σw·sin2θ, Σw·cos2θ)。"""
+    """Two-value weighted closed form (boundary-cell weights 0.025/0.05): 30°/80° -> ½·atan2(Σw·sin2θ, Σw·cos2θ)."""
     n = 7200
     vals = np.full((1, n), np.nan, dtype=np.float32)
     vals[0, 0], vals[0, 1] = 30.0, 80.0
@@ -119,7 +120,6 @@ def test_axial_weighted_two_value_closed_form():
     mask[0, 0] = mask[0, 1] = True
     v, _ = conservative_overlap_circular_axial(
         vals, mask, np.array([-0.05, 0.05]), THREE_MIN, Fraction(1, 10))
-    # 目标 0.1° 列 0：源列 0（界胞半权 0.025）、列 1（全权 0.05）；列 2 半权但无效
     w0, w1 = 0.025, 0.05
     c = w0 * np.cos(np.deg2rad(60.0)) + w1 * np.cos(np.deg2rad(160.0))
     s = w0 * np.sin(np.deg2rad(60.0)) + w1 * np.sin(np.deg2rad(160.0))
@@ -127,7 +127,6 @@ def test_axial_weighted_two_value_closed_form():
     assert v[900, 0] == pytest.approx(expect, abs=1e-5)
 
 
-# ---------------- 分区读取器（合成 grd） ----------------
 
 def _write_grd(path: Path, x, y, z):
     import netCDF4
@@ -144,7 +143,7 @@ def _write_grd(path: Path, x, y, z):
 
 
 def _make_zone_files(tmp_path, code, x, y, comp_values, date="02.24.18"):
-    """写五分量 grd；comp_values: dict comp → 标量或 (ny,nx) 数组。"""
+    """Write the five-component grd; comp_values: dict comp -> scalar or (ny,nx) array."""
     for comp in slab2.COMPONENTS:
         z = comp_values[comp]
         z = np.broadcast_to(np.asarray(z, dtype=np.float32), (len(y), len(x))).copy()
@@ -157,7 +156,7 @@ def _lattice(x0, nx, step):
 
 
 def test_loader_sign_and_axial_transform(tmp_path):
-    """dep 取负（正向下）；str mod 180；dip/thk/unc 原样。"""
+    """dep is negated (positive down); str mod 180; dip/thk/unc taken as-is."""
     x = _lattice(10.0, 5, 0.05)
     y = _lattice(20.0, 3, 0.05)
     _make_zone_files(tmp_path, "alu", x, y, {
@@ -172,7 +171,7 @@ def test_loader_sign_and_axial_transform(tmp_path):
 
 
 def test_loader_rejects_off_lattice_origin(tmp_path):
-    """gridline 注册破坏：起点不在步长整数倍格点 → 拒绝。"""
+    """gridline registration broken: the origin is not at an integer multiple of the step on the lattice -> rejected."""
     x = _lattice(10.02, 5, 0.05)
     y = _lattice(20.0, 3, 0.05)
     _make_zone_files(tmp_path, "alu", x, y, {c: 1.0 for c in slab2.COMPONENTS})
@@ -181,7 +180,7 @@ def test_loader_rejects_off_lattice_origin(tmp_path):
 
 
 def test_loader_rejects_nonuniform_step(tmp_path):
-    x = np.array([10.0, 10.05, 10.11, 10.15])        # 步长漂移
+    x = np.array([10.0, 10.05, 10.11, 10.15])
     y = _lattice(20.0, 3, 0.05)
     _make_zone_files(tmp_path, "alu", x, y, {c: 1.0 for c in slab2.COMPONENTS})
     with pytest.raises(ValueError, match="步长"):
@@ -199,7 +198,7 @@ def test_loader_rejects_component_geometry_mismatch(tmp_path):
 
 
 def test_loader_rejects_resolution_list_violation(tmp_path):
-    """0.02° 网格挂在非 0.02 分区码（或反之）→ 契约清单拒绝。"""
+    """A 0.02° grid attached to a non-0.02 zone code (or vice versa) -> rejected by the contract list."""
     x = _lattice(10.0, 5, 0.02)
     y = _lattice(20.0, 3, 0.02)
     _make_zone_files(tmp_path, "alu", x, y, {c: 1.0 for c in slab2.COMPONENTS})
@@ -215,14 +214,15 @@ def test_loader_002_zone_accepted(tmp_path):
     assert zone.lon_res == Fraction(1, 50)
 
 
-# ---------------- 合并规则（合成分区，monkeypatch 分区集） ----------------
 
 @pytest.fixture()
 def two_zone_src(tmp_path):
-    """两分区：alu 深（dep -300）、cal 浅（dep -100），重叠带 dep 并列无关。
+    """Two zones: alu deep (dep -300), cal shallow (dep -100); the overlap band is
+    unaffected by the dep tie.
 
-    网格 0.05°，alu x∈[10,10.20]、cal x∈[10.10,10.30]，y 同 [20,20.10]：
-    重叠区 x∈[10.10,10.20]；分量值各分区常数可辨。
+    Grid 0.05°, alu x∈[10,10.20], cal x∈[10.10,10.30], y the same [20,20.10]:
+    overlap region x∈[10.10,10.20]; the component values are constant and
+    distinguishable per zone.
     """
     ya = _lattice(20.0, 3, 0.05)
     x_alu = _lattice(10.0, 5, 0.05)
@@ -247,34 +247,29 @@ def _pixel(lon, lat):
 
 
 def test_merge_shallowest_depth_wins(two_zone_src, monkeypatch):
-    """重叠区取 depth 最浅（cal -100 → 100 km）分区的全部五分量。"""
+    """The overlap region takes all five components from the shallowest-depth zone (cal -100 -> 100 km)."""
     m = _merge_under(two_zone_src, ("alu", "cal"), monkeypatch)
-    i, j = _pixel(10.15, 20.05)                       # 重叠带（两区节点均覆盖）
+    i, j = _pixel(10.15, 20.05)
     assert m["fields"]["dep"][i, j] == np.float32(100.0)
     assert m["fields"]["dip"][i, j] == np.float32(60.0)
     assert m["fields"]["str"][i, j] == np.float32(120.0)
     assert m["fields"]["thk"][i, j] == np.float32(90.0)
     assert m["fields"]["unc"][i, j] == np.float32(22.0)
-    # cal 独占区（[10.25,10.30]：alu 末节点胞 ≤10.225 不可及）
     i2, j2 = _pixel(10.25, 20.05)
     assert m["fields"]["dep"][i2, j2] == np.float32(100.0)
-    # alu 独占区（[10.00,10.05]：cal 首节点胞 ≥10.075 不可及）
     i3, j3 = _pixel(10.02, 20.05)
     assert m["fields"]["dep"][i3, j3] == np.float32(300.0)
 
 
 def test_merge_outside_slab_nan_and_counts(two_zone_src, monkeypatch):
-    """板片区外 NaN；计数 3′=2/1、粗档并集基数（非块内求和）。"""
+    """NaN outside the slab zones; counts 3′=2/1, coarser tiers use union cardinality (not an in-block sum)."""
     m = _merge_under(two_zone_src, ("alu", "cal"), monkeypatch)
     i0, j0 = _pixel(50.0, 50.0)
     assert np.isnan(m["fields"]["dep"][i0, j0])
     i, j = _pixel(10.15, 20.05)
     assert m["counts"]["3min"][i, j] == 2
     assert m["counts"]["6min"][i // 2, j // 2] >= 1
-    # alu 独占 3′ 像元的 1° 计数 = 1（并集基数）；朴素块内求和会把单一
-    # 分区按其覆盖的 3′ 子像元数累计（该 1° 像元内 400 子像元全为 alu
-    # → 朴素和 400），与「分区数 ≤27」语义冲突——本核不取该路径
-    i4, j4 = _pixel(10.02, 20.05)                     # alu 独占
+    i4, j4 = _pixel(10.02, 20.05)
     assert m["counts"]["3min"][i4, j4] == 1
     assert m["counts"]["1deg"][i4 // 20, j4 // 20] <= 2
     stats = m["stats"]
@@ -283,19 +278,19 @@ def test_merge_outside_slab_nan_and_counts(two_zone_src, monkeypatch):
 
 
 def test_merge_tie_breaks_dictionary_order(two_zone_src, monkeypatch):
-    """depth 位级并列 → 分区码字典序靠前者（alu）胜出——确定性。"""
+    """Bit-exact depth tie -> the zone whose code comes first in dictionary order (alu) wins -- determinism."""
     ya = _lattice(20.0, 3, 0.05)
     x_cal = _lattice(10.10, 5, 0.05)
-    _make_zone_files(two_zone_src, "cal", x_cal, ya, {   # 覆盖同名文件（同日期）
+    _make_zone_files(two_zone_src, "cal", x_cal, ya, {
         "dep": -300.0, "dip": 60.0, "str": 120.0, "thk": 90.0, "unc": 22.0}, date="02.23.18")
     m = _merge_under(two_zone_src, ("alu", "cal"), monkeypatch)
     i, j = _pixel(10.15, 20.05)
-    assert m["fields"]["dip"][i, j] == np.float32(20.0)   # alu 的 dip
+    assert m["fields"]["dip"][i, j] == np.float32(20.0)
     assert m["stats"]["depth_tie_pixels"] > 0
 
 
 def test_merge_002_fractional_zone(tmp_path, monkeypatch):
-    """0.02 分区（mue）分数倍 2.5 → 3′：常数场位级直出，覆盖正确。"""
+    """0.02 zone (mue), fractional multiple 2.5 -> 3′: a constant field comes out bit-exact, with correct coverage."""
     x = _lattice(10.0, 25, 0.02)
     y = _lattice(20.0, 10, 0.02)
     _make_zone_files(tmp_path, "mue", x, y, {
@@ -308,21 +303,19 @@ def test_merge_002_fractional_zone(tmp_path, monkeypatch):
 
 
 def test_merge_ring_wrap_dateline(tmp_path, monkeypatch):
-    """跨日期线分区（x 179.9..180.1）：嵌入环后场经回绕落 -180 邻域。"""
-    x = _lattice(178.0, 9, 0.05)                      # 178..178.4，不跨线
-    xw = _lattice(179.9, 5, 0.05)                     # 179.9..180.1 跨 +180
+    """Date-line-crossing zone (x 179.9..180.1): after embedding into the ring the field wraps around onto the -180 neighborhood."""
+    x = _lattice(178.0, 9, 0.05)
+    xw = _lattice(179.9, 5, 0.05)
     y = _lattice(20.0, 3, 0.05)
     _make_zone_files(tmp_path, "alu", xw, y, {
         "dep": -1.0, "dip": 1.0, "str": 1.0, "thk": 1.0, "unc": 1.0})
     _make_zone_files(tmp_path, "cal", x, y, {c: 2.0 for c in slab2.COMPONENTS}, date="02.23.18")
     m = _merge_under(tmp_path, ("alu", "cal"), monkeypatch)
-    # 180.05 ≡ -179.95 → 环回绕列；dep 取负后为 +1
     i, j = _pixel(-179.95, 20.05)
     assert m["fields"]["dep"][i, j] == np.float32(1.0)
     assert m["counts"]["3min"][i, j] == 1
 
 
-# ---------------- 构建器 ----------------
 
 def _entry(layer_id, visibility="public"):
     from cubebuild.contract import LayerEntry
@@ -369,7 +362,6 @@ def test_builders_attrs_and_dtypes(two_zone_src, monkeypatch):
     assert stats["overlap_3min_pixels"] == m["stats"]["overlap_3min_pixels"]
 
 
-# ---------------- 真实源 e2e ----------------
 
 _MINI = """\
 version: mini-slab2-test
@@ -436,8 +428,10 @@ layers:
 
 @requires_slab2
 def test_slab2_e2e(tmp_path, monkeypatch):
-    """六层全链路：build（含合并回报）→ 结构验证 PASS → manifest（值域/合并
-    规则/计数语义登记）→ 保真六层 PASS（非重叠区与分区源一致）。"""
+    """Six-layer full pipeline: build (including the merge report) -> structure
+    validation PASS -> manifest (value range / merge rule / count semantics
+    recorded) -> six-layer fidelity PASS (non-overlap regions agree with the
+    zone source)."""
     import cubebuild.cli
     from cubebuild.manifest import read_manifest
 
@@ -453,7 +447,6 @@ def test_slab2_e2e(tmp_path, monkeypatch):
     ])
     assert rc == 0
 
-    # 合并回报（重叠像元总量写入构建回报）
     import json
     merge_stats = json.loads((reports / "slab2-merge.json").read_text(encoding="utf-8"))
     assert merge_stats["overlap_3min_pixels"] == 15241
@@ -473,17 +466,14 @@ def test_slab2_e2e(tmp_path, monkeypatch):
     om = entries["stress_kinematics__slab2_overlap_mask"]
     assert "并集基数" in om["count_semantics"]
     assert om["resampling"] == "sum"
-    # 覆盖率：depth 各档有缺测（板片区外），overlap_mask 全档 1.0（0 为真实计数）
     assert 0.0 < d["coverage"]["3min"] < 1.0
     assert om["coverage"]["3min"] == 1.0
 
-    # 保真：六层全 PASS（分区源与合并层非重叠区一致）
     for lid in list(entries):
         report = slab2.build_slab2_fidelity_report(out, lid, ["1deg", "30min", "6min", "3min"])
         assert report["result"] == "PASS", [
             c for c in report["checks"] if c["status"] == "FAIL"]
 
-    # 3′ strike 值域（轴向）+ 计数互证
     import xarray as xr
     with xr.open_datatree(out, engine="zarr", chunks={}) as dt:
         strike = dt["/3min"].ds["stress_kinematics__slab2_strike"].values

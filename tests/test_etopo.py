@@ -1,10 +1,14 @@
-"""测试：ETOPO 适配器 + 面积加权保守核 + 保真 harness。
+"""Tests: ETOPO adapter + area-weighted conservative kernel + fidelity harness.
 
-判据只测外部行为：
-- 保守核：积分量解析守恒（float64 下相对误差 ~1e-12）+ 加权均值正确性；
-- 覆盖校验：缺片即 SourceNotReady 且列明缺失清单（bed 优先规则）；
-- 真实瓦片集成：62 片 bed 中相邻瓦片聚合后与手算加权均值逐位一致；
-- fidelity checks：合成源 → 积分偏差通过 + 分位数单调偏移方向正确。
+Checks test external behavior only:
+- conservative kernel: analytic conservation of the integral quantity (relative error ~1e-12
+  under float64) + correctness of the weighted mean;
+- coverage validation: a missing tile yields SourceNotReady with the missing list itemized
+  (bed-priority rule);
+- real tile integration: after aggregating adjacent tiles among the 62 bed pieces, they match
+  the hand-computed weighted mean bitwise;
+- fidelity checks: synthetic source → integral deviation passes + quantile monotone shift
+  direction correct.
 """
 
 from pathlib import Path
@@ -33,22 +37,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = REPO_ROOT / "original data/topography/etopo2022-bed"
 
 
-# ---------------- 核：面积加权保守平均 ----------------
 
 def test_aggregate_weighted_value_correctness():
-    """factor=2 小矩阵：粗像元 = 行面积加权平均（列等权），与手算一致。"""
-    # 4 行 × 2 列源，factor 2 → 2×1 粗像元
+    """factor=2 small matrix: coarse cell = row-area-weighted mean (columns equally weighted), consistent with hand computation."""
     data = np.array([[1.0, 3.0], [5.0, 7.0], [10.0, 20.0], [30.0, 40.0]])
-    w = np.array([1.0, 3.0, 2.0, 2.0])  # 行面积权重
+    w = np.array([1.0, 3.0, 2.0, 2.0])
     out = aggregate_weighted(data, w, 2)
-    # 粗(0,0)：行0 权1 → 1·(1+3)；行1 权3 → 3·(5+7)；除以 (1+1+3+3)=8 → 40/8=5
     assert out[0, 0] == pytest.approx(5.0)
-    # 粗(1,0)：行2/3 权各2 → 2·(10+20)+2·(30+40) = 200；除以 8 → 25
     assert out[1, 0] == pytest.approx(25.0)
 
 
 def test_aggregate_integral_conservation():
-    """解析恒等式：Σ_coarse v_c·A_c == Σ_fine v·A（float64 相对误差 < 1e-12）。"""
+    """Analytic identity: Σ_coarse v_c·A_c == Σ_fine v·A (float64 relative error < 1e-12)."""
     rng = np.random.default_rng(42)
     m = n = 240
     factor = 12  # 15s → 3min
@@ -57,7 +57,6 @@ def test_aggregate_integral_conservation():
     w_fine = row_areas_km2(45.0, m, res_fine)
     coarse = aggregate_weighted(data, w_fine, factor)
 
-    # 粗像元面积 = factor·Σ(块内行面积)（Δλ_c = factor·Δλ_f 的解析恒等式）
     wc = w_fine.reshape(m // factor, factor).sum(axis=1) * factor
     fine_total = float((data * w_fine[:, None]).sum())
     coarse_total = float((coarse * wc[:, None]).sum())
@@ -69,25 +68,23 @@ def test_aggregate_rejects_noninteger_factor():
         aggregate_weighted(np.zeros((5, 4)), np.ones(5), 2)
 
 
-# ---------------- 瓦片网格与覆盖校验 ----------------
 
 def test_label_grid_and_bounds():
     assert len(all_labels()) == 288
     assert label_bounds("N60W030") == (60.0, -30.0)
-    assert label_bounds("N00E000") == (0.0, 0.0)     # −15..0 带：北边界 0，N 前缀（目录实测）
+    assert label_bounds("N00E000") == (0.0, 0.0)
     assert label_bounds("S75W180") == (-75.0, -180.0)
     assert label_bounds("N90E165") == (90.0, 165.0)
 
 
 def test_scan_tiles_bed_priority_and_missing(tmp_path):
-    """bed 优先规则 + 缺失清单（tmp 目录模拟部分覆盖）。"""
-    # 本地 bed 瓦占 62 位；tmp 模拟：1 片 bed + 1 片 surface（同位并存）+ 1 片 surface
+    """bed-priority rule + missing list (tmp directory simulates partial coverage)."""
     d = tmp_path
     (d / "ETOPO_2022_v1_15s_N90E000_bed.tif").write_bytes(b"")
     (d / "ETOPO_2022_v1_15s_N90E000_surface.tif").write_bytes(b"")
     (d / "ETOPO_2022_v1_15s_S75W180_surface.tif").write_bytes(b"")
     tiles = scan_tiles(d)
-    assert tiles["N90E000"].name.endswith("_bed.tif")   # bed 优先
+    assert tiles["N90E000"].name.endswith("_bed.tif")
     assert tiles["S75W180"].name.endswith("_surface.tif")
     miss = missing_tiles(d)
     assert len(miss) == 286
@@ -95,7 +92,7 @@ def test_scan_tiles_bed_priority_and_missing(tmp_path):
 
 
 def test_real_disk_coverage_complete():
-    """真实磁盘：62 bed + 226 surface = 288 位全球覆盖齐备（数据到货后）。"""
+    """Real disk: 62 bed + 226 surface = 288 positions of complete global coverage (once data arrives)."""
     if not SRC_DIR.is_dir():
         pytest.skip("源目录不存在")
     assert missing_tiles(SRC_DIR) == []
@@ -105,17 +102,16 @@ def test_real_disk_coverage_complete():
     assert len(tiles) == 288
 
 
-# ---------------- 掩膜冰面口径：surface 优先瓦片选择 ----------------
 
 def test_scan_surface_tiles_priority_and_bed_ignored(tmp_path):
-    """surface 优先：bed 瓦被忽略、ice_surface_dir 同位优先、两目录互补。"""
+    """surface priority: bed tiles ignored, ice_surface_dir same-position priority, the two directories complementary."""
     src, ice = tmp_path / "src", tmp_path / "ice"
     src.mkdir()
     ice.mkdir()
-    (src / "ETOPO_2022_v1_15s_N90E000_bed.tif").write_bytes(b"")       # bed：忽略
-    (src / "ETOPO_2022_v1_15s_N90E000_surface.tif").write_bytes(b"")   # 同位：ice 优先
+    (src / "ETOPO_2022_v1_15s_N90E000_bed.tif").write_bytes(b"")
+    (src / "ETOPO_2022_v1_15s_N90E000_surface.tif").write_bytes(b"")
     (ice / "ETOPO_2022_v1_15s_N90E000_surface.tif").write_bytes(b"")
-    (src / "ETOPO_2022_v1_15s_S75W180_surface.tif").write_bytes(b"")   # 无冰区：src
+    (src / "ETOPO_2022_v1_15s_S75W180_surface.tif").write_bytes(b"")
     tiles = scan_surface_tiles(src, ice)
     assert set(tiles) == {"N90E000", "S75W180"}
     assert tiles["N90E000"] == ice / "ETOPO_2022_v1_15s_N90E000_surface.tif"
@@ -123,26 +119,28 @@ def test_scan_surface_tiles_priority_and_bed_ignored(tmp_path):
 
 
 def test_require_surface_coverage_missing_list(tmp_path):
-    """全域 ice-surface 覆盖缺片 → SourceNotReady 且列明清单。"""
+    """Missing tiles in the global ice-surface coverage → SourceNotReady with the list itemized."""
     d = tmp_path
     (d / "ETOPO_2022_v1_15s_N90E000_surface.tif").write_bytes(b"")
     with pytest.raises(SourceNotReady) as ei:
-        require_surface_coverage(d, d)      # 冰目录＝src 同目录 → 并集仅 1/288 位
+        require_surface_coverage(d, d)
     assert ei.value.missing == [
         lb for lb in all_labels() if lb != "N90E000"
     ]
 
 
 def test_scan_surface_tiles_missing_dir_raises(tmp_path):
-    """源目录不存在 → 显式 FileNotFoundError（非静默空扫描误报缺片）。"""
+    """Source directory does not exist → explicit FileNotFoundError (not a silent empty scan falsely reporting missing tiles)."""
     with pytest.raises(FileNotFoundError):
         scan_surface_tiles(tmp_path / "no-such-src", tmp_path / "no-such-ice")
 
 
 def test_real_disk_surface_coverage_complete():
-    """真实磁盘：bed_crosscheck 62 冰区 surface + 源目录 226 surface = 288 位。
+    """Real disk: bed_crosscheck 62 ice-zone surface + source directory 226 surface = 288
+    positions.
 
-    交付的消费端实证：掩膜冰面口径的全域 ice-surface 输入齐备。
+    Consumer-side evidence of the delivery: the global ice-surface input for the mask
+    ice-surface calibration is complete.
     """
     if not SRC_DIR.is_dir():
         pytest.skip("源目录不存在")
@@ -150,17 +148,17 @@ def test_real_disk_surface_coverage_complete():
     assert len(tiles) == 288
     n_ice = sum(1 for p in tiles.values() if "bed_crosscheck" in str(p))
     assert n_ice == 62
-    # bed 优先复合口径不受影响：源目录扫描仍为 288 位 bed 优先选择
     bed_tiles = scan_tiles(SRC_DIR)
     assert sum(1 for p in bed_tiles.values() if p.name.endswith("_bed.tif")) == 62
 
 
-# ---------------- 真实瓦片聚合集成 ----------------
 
 def test_real_tile_aggregation_matches_manual():
-    """真实 bed 瓦（S75E000，北边界 −75）：1° 档聚合 == 独立行循环加权均值。
+    """Real bed tile (S75E000, north boundary −75): 1° tier aggregation == an independent
+    row-loop weighted mean.
 
-    独立算法：逐粗像元显式循环（不与 aggregate_weighted 共享代码路径）。
+    Independent algorithm: an explicit loop over coarse cells (not sharing a code path with
+    aggregate_weighted).
     """
     path = SRC_DIR / "ETOPO_2022_v1_15s_S75E000_bed.tif"
     if not path.exists():
@@ -179,14 +177,11 @@ def test_real_tile_aggregation_matches_manual():
             block = data[ci * factor:(ci + 1) * factor, cj * factor:(cj + 1) * factor]
             wb = w[ci * factor:(ci + 1) * factor]
             manual[ci, cj] = (block * wb[:, None]).sum() / (wb.sum() * factor)
-    manual = manual[::-1]   # 构建器输出行 0 = 瓦南缘；手算行 0 = 瓦北缘 → 对齐翻转
-    # float32 产物 vs float64 手算：1e-4 m 量级容差（float32 有效数字 ~7 位）
+    manual = manual[::-1]
     np.testing.assert_allclose(out, manual, atol=1e-3)
-    # 物理合理性：南极冰下基岩应为负值主导（BedMachine 冰下地形）
     assert out.min() < -500
 
 
-# ---------------- 迷你端到端：288 位合成网格 → build_etopo_bedrock ----------------
 
 def _mini_entry(tiers=("1deg",)):
     from cubebuild.contract import LayerEntry
@@ -200,10 +195,13 @@ def _mini_entry(tiers=("1deg",)):
 
 
 def test_build_assembles_global_grid(tmp_path, monkeypatch):
-    """288 位合成瓦片 → 全球数组：形状/坐标/dtype/南北带序/bed 覆盖 surface。
+    """288 synthetic tiles → a global array: shape/coords/dtype/north-south band order/bed
+    covering surface.
 
-    缩小几何：瓦 120×120、源分辨率 0.125°（1° 档 factor=8 整数），网格拓扑
-    与真实一致（12 带 × 24 列，自北向南带序、S75 在数组最前）。
+    Reduced geometry: tile 120×120, source resolution 0.125° (1° tier factor=8 integer), grid
+    topology
+    matches the real one (12 bands × 24 columns, north-to-south band order, S75 first in the
+    array).
     """
     import cubebuild.etopo as etopo_mod
     import rasterio
@@ -214,14 +212,12 @@ def test_build_assembles_global_grid(tmp_path, monkeypatch):
     monkeypatch.setattr(etopo_mod, "SRC_RES_DEG", 15.0 / tile_shape[0])
 
     paths = {}
-    for bi, band in enumerate(LAT_BANDS):        # bi=0 为最北带 N90
-        band_top = 90 - bi * 15                  # 该带北边界纬度
+    for bi, band in enumerate(LAT_BANDS):
+        band_top = 90 - bi * 15
         for col in LON_COLS:
             label = band + col
-            kind = "bed" if bi % 2 == 0 else "surface"  # 交错 bed/surface
+            kind = "bed" if bi % 2 == 0 else "surface"
             f = tmp_path / f"ETOPO_2022_v1_15s_{label}_{kind}.tif"
-            # 值 = 纬度×1000 + 经度：同时捕获行序/列序/经度环旋转三类错位
-            # （线性场在保守平均下均值=粗像元中心值，解析可断言）
             _, left = etopo_mod.label_bounds(label)
             rr = np.arange(tile_shape[0])[:, None]
             cc = np.arange(tile_shape[1])[None, :]
@@ -234,7 +230,6 @@ def test_build_assembles_global_grid(tmp_path, monkeypatch):
                 dst.write(v.astype(np.float32), 1)
             paths[label] = f
     assert len(paths) == 288
-    # elevation_array 经 src_dir 参数调用（抽出共用入口），lambda 须收参
     monkeypatch.setattr(etopo_mod, "require_full_coverage", lambda *a, **k: paths)
 
     arr = etopo_mod.build_etopo_bedrock(_mini_entry(), "1deg")
@@ -246,19 +241,15 @@ def test_build_assembles_global_grid(tmp_path, monkeypatch):
     assert arr.dtype == np.float32
 
     vals = arr.compute().values
-    # 线性场：粗像元均值 = 中心纬度×1000 + 中心经度（容差 = 半档×1000）
     np.testing.assert_allclose(
         vals, lat[:, None] * 1000.0 + lon[None, :], atol=600.0
     )
 
 
 def test_build_raises_when_grid_misaligned(monkeypatch, tmp_path):
-    """瓦块不整除全球网格（如档位非法）→ 显式失败。"""
+    """Tile blocks do not evenly divide the global grid (e.g. an illegal tier) → explicit failure."""
     import cubebuild.etopo as etopo_mod
 
-    # 不需要真实数据：构造 288 假路径，patch TILE_SHAPE 使 1deg factor=8、
-    # 但把 require_full_coverage 返回的路径指向不可读文件 → 任何 tier 均应在
-    # 组装前通过几何校验。此处直接用非法 tier 触发 grids 报错路径。
     paths = {lb: tmp_path / "x.tif" for lb in all_labels()}
     monkeypatch.setattr(etopo_mod, "require_full_coverage", lambda *a, **k: paths)
     with pytest.raises(Exception):
@@ -273,14 +264,14 @@ def test_hist_quantiles_roundtrip():
     hist = hist_add(hist, values)
     q = quantiles_from_hist(hist, (25, 50, 75))
     assert q["q25"] < q["q50"] < q["q75"]
-    assert -0.6 <= q["q50"] <= 0.6  # 两半之间（bin 中心插值，±0.5m 精度）
+    assert -0.6 <= q["q50"] <= 0.6
 
 
 def test_fidelity_checks_pass_and_quantile_report():
-    """合成源 → 保守聚合 → 积分偏差远小于 0.1% + 分位数偏移成报告。"""
+    """Synthetic source → conservative aggregation → integral deviation far below 0.1% + quantile shift becomes a report."""
     rng = np.random.default_rng(7)
     src = rng.uniform(-8000, 5000, size=(240, 240))
-    factor = 24  # → 6min 档尺寸
+    factor = 24
     w = row_areas_km2(30.0, 240, 15.0 / 3600.0)
     coarse = aggregate_weighted(src, w, factor)
 
@@ -298,13 +289,12 @@ def test_fidelity_checks_pass_and_quantile_report():
     assert integral["rel_dev"] < 1e-12
     qrep = next(c for c in checks if "shift_m" in c)
     assert qrep["status"] == "report"
-    # 保守平均压缩分布：q1 上移（极小值被抬升）、q99 下移
     assert qrep["shift_m"]["q1"] > 0
     assert qrep["shift_m"]["q99"] < 0
 
 
 def test_fidelity_detects_integral_violation():
-    """源统计被篡改 → 积分判据 FAIL（harness 确有拦截力）。"""
+    """Source statistics are tampered with → the integral check FAILs (the harness does have interception power)."""
     rng = np.random.default_rng(1)
     tier_s = {
         "sum_va": 100.0,
@@ -315,7 +305,6 @@ def test_fidelity_detects_integral_violation():
     assert checks[0]["status"] == "FAIL"
 
 
-# ---------------- manifest extras 防护 ----------------
 
 def test_manifest_extras_reject_canonical_key_clash():
     from cubebuild.manifest import build_layer_entry

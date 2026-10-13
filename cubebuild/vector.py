@@ -1,32 +1,46 @@
-"""矢量通道（侧车导出器）：Hasterok GPRV 构造省一级分类。
+"""Vector channel (sidecar exporter): Hasterok GPRV tectonic-province
+first-order classification.
 
-源（磁盘实证）：
-- plates&provinces/shp/global_gprv.shp：914 多边形（834 Polygon +
-  80 MultiPolygon），EPSG:4326，穷尽覆盖（3′ 胞心栅格化覆盖率
-  0.99991，未覆盖 241 胞 = 省界数字化缝隙）。一级分类 = prov_type
-  （论文 Table 1: "dominant tectonic character"），数据实际 15 类
-  （官方图例 gprv_types.qml 另含 oceanic plateau/unknown 两类，
-  本版数据未出现）。
-- 多边形重叠（磁盘实证）：Σ面积 − ∪面积 = 0.66 deg²（0.001%），
-  均为省界毗邻处的数字化狭条，非嵌套层级。重叠处理（同 Slab2 惯例：
-  显式确定性规则 + 构建期回报总量）：重叠像元取面积较小多边形
-  （局部细化特征优先）。
-- 极区/日期线（磁盘实证）：环上唯一 |Δlon|>180° 的边为北极盆闭合边
-  （−180,90)→(180,90，标准极帽 cut 表示，平面栅格化正确）；无跨
-  日期线边，平面胞心栅格化安全。
+Source (verified on disk):
+- plates&provinces/shp/global_gprv.shp: 914 polygons (834 Polygon +
+  80 MultiPolygon), EPSG:4326, exhaustive coverage (3′ cell-center
+  rasterization coverage
+  0.99991; 241 cells uncovered = digitization gaps at province boundaries).
+  The first-order classification = prov_type
+  (the paper's Table 1: "dominant tectonic character"); the data actually has 15
+  classes
+  (the official legend gprv_types.qml additionally has oceanic plateau/unknown,
+  which do not occur in this version of the data).
+- Polygon overlap (verified on disk): Σarea − ∪area = 0.66 deg² (0.001%),
+  all digitization slivers at adjacent province boundaries, not a nesting
+  hierarchy. Overlap handling (same Slab2 convention:
+  an explicit deterministic rule + the total reported at build time): an
+  overlapping cell takes the smaller-area polygon
+  (locally refined features take priority).
+- Poles/date line (verified on disk): the only edge with |Δlon|>180° on a ring
+  is the Arctic basin closure edge
+  (−180,90)→(180,90, the standard polar-cap cut representation, correctly
+  rasterized in the plane); no date-line-crossing
+  edges, so planar cell-center rasterization is safe.
 
-通道机制（三件之一/之二）：
-- 多边形栅格化器 rasterize_polygon_classes：按主档网格胞心落入
-  多边形赋类（all_touched=False），向粗档经 kernels.aggregate_mode
-  众数聚合（nodata=0 不参与、平票取小、≥1 有效子胞即有值——与保守
-  核「W>0 即有值」同语义，惯例）。后续矢量组（板块/陆地类别）
-  复用。
-- 整型类别层缺测语义：类别编码自 1 起，0 = 无类别（masks.data_missing
-  唯一实现），伴生 validity 掩膜两通道一致。
+Channel mechanism (one of / two of three):
+- The polygon rasterizer rasterize_polygon_classes: assigns a class by a home
+  tier grid cell center falling in the polygon
+  (all_touched=False), and to coarse tiers via kernels.aggregate_mode
+  majority aggregation (nodata=0 excluded, ties take the smaller code, ≥1 valid
+  subcell means the cell has a value—the same semantics as the conservative
+  kernel's "W>0 means value", convention). Later vector groups (plate/land
+  class)
+  reuse it.
+- Integer class layers' missing semantics: class encoding starts from 1, 0 = no
+  class (the single implementation masks.data_missing),
+  the companion validity mask and the two channels are consistent.
 
-穷尽覆盖型豁免距离场：本通道不产距离层。
-许可：Zenodo 存档 10.5281/zenodo.6586972 CC BY 4.0（发布依据，
-规避 GitHub 仓库 GPL-3.0 对数据的传染性争议——r1 许可审计）。
+Exhaustive-coverage exemption from the distance field: this channel produces no
+distance layer.
+License: Zenodo archive 10.5281/zenodo.6586972 CC BY 4.0 (the release basis,
+avoiding the controversy over the GitHub repository GPL-3.0's virality over
+data—r1 license audit).
 """
 
 import json
@@ -46,14 +60,11 @@ GPRV_SRC_DIR = REPO_ROOT / "original data/lithosphere/tectonic-provinces"
 GPRV_REL_PATH = "plates&provinces/shp/global_gprv.shp"
 
 HASTEROK_DOI = "10.1016/j.earscirev.2022.104069"   # Hasterok et al. 2022, ESR 231, 104069
-ZENODO_DOI = "10.5281/zenodo.6586972"              # CC BY 4.0 存档 v1（ESR 论文数据声明版本；发布许可依据）
+ZENODO_DOI = "10.5281/zenodo.6586972"
 
 HASTEROK_LAYER_ID = "lithosphere__hasterok_province_class"
 HOME_TIER = "3min"
 
-# 一级分类编码表（prov_type → uint8 码，1 起；0 = 无类别）。
-# 词汇表 = 磁盘实测 15 类按字典序固定编码（确定性）；官方图例另有
-# oceanic plateau / unknown 两类本版数据未出现，不占码位。
 PROV_TYPE_CODES: dict[str, int] = {
     label: i for i, label in enumerate(sorted([
         "accretionary complex", "back-arc basin", "basin", "craton",
@@ -64,16 +75,16 @@ PROV_TYPE_CODES: dict[str, int] = {
     ]), start=1)
 }
 
-EXPECTED_ROWS = 914          # 已核查 + 源台账自证
-NODATA = 0                   # 整型类别层缺测哨兵（编码自 1 起）
+EXPECTED_ROWS = 914
+NODATA = 0
 
 
 def category_encoding() -> dict[str, str]:
-    """类别编码表（码 → 语义），attrs/manifest/sidecar 共用唯一来源。"""
+    """Class encoding table (code → semantics), the single source shared by
+    attrs/manifest/sidecar."""
     return {str(c): label for label, c in sorted(PROV_TYPE_CODES.items(), key=lambda kv: kv[1])}
 
 
-# ---------------- 源读取 ----------------
 
 def _iter_rings(geom):
     if geom.geom_type == "Polygon":
@@ -86,11 +97,13 @@ def _iter_rings(geom):
 
 
 def load_gprv(src_dir: str | Path = GPRV_SRC_DIR):
-    """读 global_gprv.shp → (GeoDataFrame, prov_type 码数组)。
+    """Read global_gprv.shp → (GeoDataFrame, prov_type code array).
 
-    几何契约（磁盘实证的契约化）：914 行、EPSG:4326、prov_type 词汇
-    ⊆ 编码表、无空几何；环边 |Δlon|>180° 仅允许极点闭合边（两端
-    |lat|=90）——跨日期线边会使平面栅格化静默错位，读取期即拒绝。
+    Geometry contract (contract-ized disk verification): 914 rows, EPSG:4326,
+    prov_type vocabulary ⊆ the encoding table, no empty geometry; a ring edge
+    with |Δlon|>180° is allowed only as a pole closure edge (both ends
+    |lat|=90)—a date-line-crossing edge would silently misplace the planar
+    rasterization, rejected at read time.
     """
     import geopandas as gpd
 
@@ -112,9 +125,6 @@ def load_gprv(src_dir: str | Path = GPRV_SRC_DIR):
     for geom in gdf.geometry:
         for ring in _iter_rings(geom):
             xy = np.asarray(ring.coords)
-            # 逐边检查全部 |Δlon|>180° 的边（非仅最大跳变）：每条都
-            # 必须是极点闭合边（两端 |lat|=90），否则拒绝——一环内
-            # 极点闭合边与较小跨日期线边并存时单查 argmax 会漏检
             for k in np.nonzero(np.abs(np.diff(xy[:, 0])) > 180.0)[0]:
                 if not (abs(xy[k][1]) == 90.0 and abs(xy[k + 1][1]) == 90.0):
                     raise ValueError(
@@ -125,18 +135,22 @@ def load_gprv(src_dir: str | Path = GPRV_SRC_DIR):
     return gdf, codes
 
 
-# ---------------- 多边形栅格化器（通道机制，后续矢量复用） ----------------
 
 def rasterize_polygon_classes(geoms, codes: np.ndarray, tier: str) -> tuple[np.ndarray, int, int]:
-    """类别多边形 → 主档类别网格（纯几何件，源无关）。
+    """Class polygons → home-tier class grid (pure geometry piece,
+    source-agnostic).
 
-    语义：胞心落入多边形即属该类（all_touched=False，与档位网格
-    中心偏移半档约定一致）；多边形重叠像元取面积较小者（局部细化
-    优先，Slab2「重叠取最浅」同款显式确定性规则）；类外像元 = 0。
+    Semantics: a cell center falling in a polygon belongs to that class
+    (all_touched=False, consistent with the tier grid's center offset of half a
+    tier); an overlapping cell takes the smaller-area polygon (locally refined
+    features take priority, the explicit deterministic rule of Slab2's
+    "overlap takes the shallowest"); cells outside any class = 0.
 
-    返回 (classes uint8 (nlat, nlon), 重叠像元数, 未覆盖像元数)。
-    逐多边形按包围盒开窗烧录（顺序 = 面积降序，小者后烧胜出），
-    全程确定性可复跑。
+    Returns (classes uint8 (nlat, nlon), overlap cell count, uncovered cell
+    count).
+    Burned polygon by polygon with a bounding-box window (order = descending
+    area, so the smaller one burns later and wins), fully deterministic and
+    rerunnable.
     """
     import rasterio.features as rfeatures
     from rasterio.transform import from_origin
@@ -144,28 +158,22 @@ def rasterize_polygon_classes(geoms, codes: np.ndarray, tier: str) -> tuple[np.n
     nlat, nlon = grid_shape(tier)
     res = tier_deg(tier)
     classes = np.zeros((nlat, nlon), dtype=np.uint8)
-    covered = np.zeros((nlat, nlon), dtype=np.uint8)   # 覆盖计数（重叠统计）
+    covered = np.zeros((nlat, nlon), dtype=np.uint8)
 
-    # 面积降序（稳定排序）：后烧者胜 → 面积较小多边形赢重叠像元
     order = np.argsort([-g.area for g in geoms], kind="stable")
     for i in order:
         g = geoms[i]
         minx, miny, maxx, maxy = g.bounds
-        # 行号自南起（行 0 = −90 侧，与档位网格约定一致）：行 r 跨
-        # [−90+r·res, −90+(r+1)·res]；列 c 跨 [−180+c·res, −180+(c+1)·res]
         r0 = max(int(np.floor((miny + 90.0) / res)) - 1, 0)
         r1 = min(int(np.ceil((maxy + 90.0) / res)) + 1, nlat)     # exclusive
         c0 = max(int(np.floor((minx + 180.0) / res)) - 1, 0)
         c1 = min(int(np.ceil((maxx + 180.0) / res)) + 1, nlon)    # exclusive
         if r0 >= r1 or c0 >= c1:
             continue
-        # 窗口北边 = 行 r1−1 的北缘；西边 = 列 c0 的西缘
         tr = from_origin(-180.0 + c0 * res, -90.0 + r1 * res, res, res)
         burned = rfeatures.rasterize(
             [(g, 1)], out_shape=(r1 - r0, c1 - c0), transform=tr, fill=0, dtype="uint8"
         ).astype(bool)
-        # rasterio 窗口行序北起（local 0 = 行 r1−1），全局网格行 0 = −90
-        # 侧——垂直翻转后落位（翻转缺陷由极帽/全网格直核比对测试覆盖）
         burned = burned[::-1]
         win = classes[r0:r1, c0:c1]
         classes[r0:r1, c0:c1] = np.where(burned, codes[i], win)
@@ -177,7 +185,8 @@ def rasterize_polygon_classes(geoms, codes: np.ndarray, tier: str) -> tuple[np.n
 
 
 def _aggregation_factor(tier: str) -> int:
-    """主档 3′ → 目标档聚合因子（grids.aggregation_factor 薄包装，模块内惯用名）。"""
+    """Home tier 3′ → target tier aggregation factor (thin wrapper around
+    grids.aggregation_factor, module-local idiomatic name)."""
     return aggregation_factor(tier, HOME_TIER)
 
 
@@ -185,7 +194,8 @@ _HOME_CACHE: dict[str, tuple[np.ndarray, int, int]] = {}
 
 
 def home_tier_classes(src_dir: str | Path = GPRV_SRC_DIR) -> tuple[np.ndarray, int, int]:
-    """主档（3′）类别网格（进程内缓存：同层四档只栅格化一次）。"""
+    """Home-tier (3′) class grid (in-process cache: the four tiers of the same
+    layer are rasterized only once)."""
     key = f"hasterok:{Path(src_dir).resolve()}"
     cache = _HOME_CACHE.get(key)
     if cache is None:
@@ -205,14 +215,16 @@ RASTERIZATION_RULE = (
 )
 
 
-# ---------------- 层构建 ----------------
 
 def build_hasterok_province_class(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 lithosphere__hasterok_province_class（uint8 类别层）。
+    """Build this tier's lithosphere__hasterok_province_class (uint8 class
+    layer).
 
-    主档 3′ = 栅格化器直出；粗档 = 主档众数聚合（整数因子
-    3′→6′/30′/1° = 2/10/20）。缺测 = 0（整型类别层约定），
-    validity 伴生掩膜由构建入口按契约自动生成。
+    Home tier 3′ = the rasterizer's direct output; coarse tiers = majority
+    aggregation of the home tier (integer factors
+    3′→6′/30′/1° = 2/10/20). Missing = 0 (the integer class layer convention),
+    and the companion validity mask is generated automatically at the build
+    entry point by the contract.
     """
     classes, _overlap, _uncovered = home_tier_classes()
     if tier == HOME_TIER:
@@ -236,8 +248,6 @@ def build_hasterok_province_class(entry: LayerEntry, tier: str) -> xr.DataArray:
         ),
         "rasterization_rule": RASTERIZATION_RULE,
         "source_file": GPRV_REL_PATH,
-        # 注意：不可命名 missing_value/_FillValue——xarray zarr 后端按 CF
-        # 约定将其当 fill 编码，读回时 0 被掩为 NaN 且 dtype 升 float32
         "nodata_semantics": "0 = 无类别（省界数字化缝隙），类别编码自 1 起",
     }
     return xr.DataArray(
@@ -246,7 +256,6 @@ def build_hasterok_province_class(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
 VECTOR_FIDELITY_LAYERS = {
     HASTEROK_LAYER_ID: {"src_dir": GPRV_SRC_DIR, "unit": "category"},
@@ -255,20 +264,23 @@ VECTOR_FIDELITY_LAYERS = {
 
 def build_hasterok_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                                    src_dir=None) -> dict:
-    """保真报告（类别层判据）：
+    """Fidelity report (class-layer criteria):
 
-    ① store 与源重算逐位一致（硬判据，位级——重算 = 栅格化器 + 众数核
-       同码路径，捕获写入/存储链路错位）；
-    ② 类别众数一致性（硬判据，验收项）：粗档 store 值 == 主档
-       store 值的众数聚合——跨档一致性以 store 自身为源，独立于 ①；
-    ③ 值域 ⊆ {0} ∪ 编码表（硬判据，编码错误捕获器）；
-    ④ 类别分布/覆盖率/重叠与未覆盖总量（报告制）。
+    ① store bit-for-bit consistent with the recomputation from source (hard
+       criterion, bit-level—recomputation = rasterizer + majority kernel on the
+       same code path, catching write/storage-chain misplacement);
+    ② class majority consistency (hard criterion, acceptance item): coarse-tier
+       store values == majority aggregation of home-tier store values—cross-tier
+       consistency using the store itself as source, independent of ①;
+    ③ value range ⊆ {0} ∪ the encoding table (hard criterion, encoding-error
+       catcher);
+    ④ class distribution/coverage/overlap and uncovered totals (report-only).
     """
     src_dir = src_dir or GPRV_SRC_DIR
     classes, overlap_cells, uncovered_cells = home_tier_classes(src_dir)
 
     checks: list[dict] = []
-    values: dict[str, np.ndarray] = {}    # 逐档 store 值（单遍读取，三组判据复用）
+    values: dict[str, np.ndarray] = {}
     with xr.open_datatree(store_dir, engine="zarr", chunks={}) as tree:
         for tier in tiers:
             node = tree[f"/{tier}"]
@@ -277,7 +289,6 @@ def build_hasterok_fidelity_report(store_dir, layer_id: str, tiers: list[str],
             v = node.ds[layer_id].values
             values[tier] = v
 
-            # ① 逐位一致（硬判据）
             expect = classes if tier == HOME_TIER else aggregate_mode(
                 classes, _aggregation_factor(tier), nodata=NODATA
             )
@@ -288,8 +299,6 @@ def build_hasterok_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-        # ② 类别众数一致性（硬判据）：粗档 == 主档 store 值的众数聚合
-        # （以 store 自身为源，独立于 ① 的跨档检验）
         for tier in tiers:
             if tier == HOME_TIER:
                 continue
@@ -303,7 +312,6 @@ def build_hasterok_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                 "summary": f"不一致像元 {n_bad}（期望 0）",
             })
 
-        # ③ 值域（硬判据）+ ④ 类别分布/覆盖率（报告制）
         valid_codes = np.array(sorted(PROV_TYPE_CODES.values()))
         for tier in tiers:
             v = values[tier]
@@ -339,7 +347,7 @@ def build_hasterok_fidelity_report(store_dir, layer_id: str, tiers: list[str],
     return {
         "layer": layer_id,
         "store": str(store_dir),
-        "integral_tolerance": INTEGRAL_TOL,   # 类别层无积分量；保留报告器统一字段
+        "integral_tolerance": INTEGRAL_TOL,
         "result": "FAIL" if n_fail else "PASS",
         "n_checks": len(checks),
         "checks": checks,

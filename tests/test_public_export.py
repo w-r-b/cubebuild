@@ -1,9 +1,13 @@
-"""导出判据（产物集合类）＋痕迹门禁：白名单齐备／排除面零出现／脚本不在产物内／
-幂等（含整体重建）／痕迹零命中；负例：误登记排除面、注入痕迹、登记项缺失 → 必须失败。
+"""Export criteria (artifact-set class) + trace gate: whitelist complete /
+excluded faces never present / scripts not in the artifact / idempotent
+(including full rebuild) / zero trace hits; negative cases: an excluded face
+mistakenly registered, an injected trace, a missing registered entry → must fail.
 
-私有侧机制（导出清单＋入口）不在本工作区时整体跳过（沿用缺失即 skip 惯例——
-公开仓不携带导出自身逻辑）。本模块自身亦经同一门禁扫描，故路径与痕迹样本均
-按运行时构造（不直书受控字符串）。
+When the private-side mechanisms (export manifest + entry point) are absent from
+this workspace everything is skipped (following the missing-artifact skip
+convention — the public repository does not carry the export logic itself). This
+module is itself scanned by the same gate, so paths and trace samples are
+constructed at runtime (controlled strings are not written literally).
 """
 
 import hashlib
@@ -50,12 +54,9 @@ def _sha_set(root: Path) -> dict:
 def test_whitelist_paths_complete(mod, tmp_path):
     out = tmp_path / "out"
     report = mod.export_public(out)
-    # 清单登记项齐备（登记即判齐备）
     for entry in mod.load_manifest()["entries"]:
         assert (out / entry.rstrip("/")).exists(), entry
-    # 关键成员：层契约位于管线包内
     assert (out / "cubebuild" / "layer-mapping-v0.yaml").is_file()
-    # 产物顶层 = 白名单顶层（顶层集合由清单派生——清单为唯一来源）
     expected_top = {e.rstrip("/").split("/")[0] for e in mod.load_manifest()["entries"]}
     assert {p.name for p in out.iterdir()} == expected_top
     assert report["n_files"] == len(_sha_set(out))
@@ -65,7 +66,6 @@ def test_excluded_faces_absent(mod, tmp_path):
     out = tmp_path / "out"
     mod.export_public(out)
     names = [str(p.relative_to(out)) for p in out.rglob("*")]
-    # 排除面清单以导出模块的单一来源为准（DENIED）
     for bad in [d.rstrip("/") for d in mod.DENIED] + ["__pycache__"]:
         assert not any(
             n == bad or n.startswith(bad + "/") or bad in Path(n).parts
@@ -77,8 +77,7 @@ def test_idempotent_and_rebuild(mod, tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     mod.export_public(a)
     mod.export_public(b)
-    assert _sha_set(a) == _sha_set(b)  # 二次导出与首次逐文件一致
-    # 整体重建：预置陈旧文件不得残留
+    assert _sha_set(a) == _sha_set(b)
     stale = a / "cubebuild" / "stale-leftover.txt"
     stale.write_text("stale", encoding="utf-8")
     mod.export_public(a)
@@ -108,8 +107,6 @@ def test_negative_denied_path_registration(mod, tmp_path):
 
 
 def test_negative_trace_injected(mod, tmp_path):
-    # 合成「未净化的源」：伪造工作仓并注入一条内部痕迹 → 预检必须失败。
-    # 样本按运行时拼接构造（本测试文件自身受同一门禁扫描）。
     sample = '"""源（磁盘实证 2026-09-' + '12）。"""\n'
     fake = tmp_path / "repo"
     (fake / "cubebuild").mkdir(parents=True)
@@ -129,12 +126,85 @@ def test_negative_missing_entry(mod, tmp_path):
 
 
 def test_negative_trace_in_suffixless_file(mod, tmp_path):
-    # 无扩展名文本要件（如 LICENSE）同样须被预检覆盖（不得按扩展名漏检）。
     sample = "内部过程记录 " + "202" + "6-09-" + "12\n"
     fake = tmp_path / "repo"
     (fake / "cubebuild").mkdir(parents=True)
     (fake / "LICENSE").write_text(sample, encoding="utf-8")
     mf = tmp_path / "manifest.yaml"
     mf.write_text("version: 1\nentries:\n  - cubebuild/\n  - LICENSE\n", encoding="utf-8")
+    with pytest.raises(mod.ExportViolation):
+        mod.export_public(tmp_path / "out", manifest_path=mf, repo=fake)
+
+
+# ---------- public-face language: comment stripping + zero-Han gate ----------
+
+def test_artifact_comment_and_docstring_face_han_free(mod, tmp_path):
+    """Public-face language criterion: the artifact has no CJK in comment/docstring regions
+    (checked for .py and .yaml alike)."""
+    out = tmp_path / "out"
+    mod.export_public(out)
+    assert mod.scan_han_artifact(out) == []
+
+
+def test_chinese_comments_stripped_english_kept_code_intact(mod, tmp_path):
+    """CJK comments are stripped from the artifact; English comments and all code survive."""
+    fake = tmp_path / "repo"
+    (fake / "cubebuild").mkdir(parents=True)
+    src = (
+        "# English comment kept\n"
+        "X = 1  # 行尾中文注释\n"
+        "# 整行中文注释\n"
+        "def f():\n"
+        '    """English docstring."""\n'
+        "    return X\n"
+    )
+    (fake / "cubebuild" / "x.py").write_text(src, encoding="utf-8")
+    mf = tmp_path / "manifest.yaml"
+    mf.write_text("version: 1\nentries:\n  - cubebuild/\n", encoding="utf-8")
+    out = tmp_path / "out"
+    mod.export_public(out, manifest_path=mf, repo=fake)
+    art = (out / "cubebuild" / "x.py").read_text(encoding="utf-8")
+    assert "English comment kept" in art
+    assert mod.ts.HAN_RE.search(art) is None
+    assert mod.scan_han_artifact(out) == []
+
+
+def test_chinese_string_constant_kept_and_not_flagged(mod, tmp_path):
+    """Boundary: CJK inside ordinary string constants is neither stripped nor flagged
+    (it belongs to the runtime-output / product-metadata face, not the comment face)."""
+    fake = tmp_path / "repo"
+    (fake / "cubebuild").mkdir(parents=True)
+    (fake / "cubebuild" / "x.py").write_text('NOTE = "中文注记"\n', encoding="utf-8")
+    mf = tmp_path / "manifest.yaml"
+    mf.write_text("version: 1\nentries:\n  - cubebuild/\n", encoding="utf-8")
+    out = tmp_path / "out"
+    mod.export_public(out, manifest_path=mf, repo=fake)
+    assert "中文注记" in (out / "cubebuild" / "x.py").read_text(encoding="utf-8")
+    assert mod.scan_han_artifact(out) == []
+
+
+def test_chinese_yaml_comment_stripped_value_kept(mod, tmp_path):
+    """A CJK YAML full-line comment is stripped; a CJK value stays (values are consumed by code)."""
+    fake = tmp_path / "repo"
+    (fake / "cubebuild").mkdir(parents=True)
+    (fake / "cubebuild" / "c.yaml").write_text("# 中文注释\nkey: 中文值\n", encoding="utf-8")
+    mf = tmp_path / "manifest.yaml"
+    mf.write_text("version: 1\nentries:\n  - cubebuild/\n", encoding="utf-8")
+    out = tmp_path / "out"
+    mod.export_public(out, manifest_path=mf, repo=fake)
+    art = (out / "cubebuild" / "c.yaml").read_text(encoding="utf-8")
+    assert "中文注释" not in art and "中文值" in art
+    assert mod.scan_han_artifact(out) == []
+
+
+def test_negative_chinese_docstring_fails_gate(mod, tmp_path):
+    """Negative: a CJK docstring is outside the stripping face → the zero-Han gate fails closed
+    (docstrings are handled at the source by translation, not by stripping)."""
+    fake = tmp_path / "repo"
+    (fake / "cubebuild").mkdir(parents=True)
+    (fake / "cubebuild" / "x.py").write_text(
+        'def f():\n    """中文 docstring。"""\n    return 1\n', encoding="utf-8")
+    mf = tmp_path / "manifest.yaml"
+    mf.write_text("version: 1\nentries:\n  - cubebuild/\n", encoding="utf-8")
     with pytest.raises(mod.ExportViolation):
         mod.export_public(tmp_path / "out", manifest_path=mf, repo=fake)

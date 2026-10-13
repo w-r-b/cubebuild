@@ -1,48 +1,69 @@
-"""沉积组：GST1 全球沉积厚度 + Global Basins 双通道（internal）。
+"""Sediment group: GST1 global sediment thickness + Global Basins dual
+channel (internal).
 
-源（磁盘实证）：
+Source (verified on disk):
 
-- GST14_WGS84.XYZ（Bird & Mooney 2026 GST-1，birdgeo.com 下载）：XYZ 点格
-  4151521 数据行 = 1441 纬度 × 2881 经度（0.125° gridline 节点注册的
-  全球完整网格，无缺行——4151521 = 1441×2881 精确成立）。列序陷阱
-  （磁盘实证）：表头写 "Lon Lat meter"，
-  实际数据列序为 Lat, Lon, meter（col1 固定纬度自 -90 升步 0.125、
-  col2 经度内循环 -180..180 步 0.125）——按位置取列、禁按表头列名取；
-  首行实测 (-90, -180)。±180 列逐位相同（周期重复副本，弃 +180 列，
-  WGM2012 同款）；±90 极点行行内常值（极点单点）。值域 0..20118 m、
-  无 NaN——0 = 无沉积为真实值（占 3.26%），非缺测。节点→Voronoi 胞
-  解释：胞 = 节点 ±1/16°，极点行纬度钳制半权，
-  经度环接日期线。
-- evenick2021_global_basins.shp（Evenick 2021 ESR 215:103564）：768
-  Polygon = 764 盆地（Basin UBI 唯一）+ 4 跨日期线盆地（Ross / Anadyr /
-  Hope / Khatyrka）各拆 2 片（Split Poly=Yes，两片分别落日期线两侧、
-  片内无跨界边）；拆分片统计列（Max/Mean/Med Sed、Moho、Poly Area）
-  为分片统计非盆地级（磁盘实证同 UBI 两片数值不同）——侧车保留 768
-  行源粒度，构建按 768 片几何烧录（同 UBI 片 Basin Type 一致，契约化）。
-  EPSG:4326；Basin Type 词汇 8 类（字典序编码 1..8）；1 个无效几何
-  （Komandorskaya 自交，make_valid 修复 = 主组分 + 0.0002 deg² 微片，
-  面积 Δ=3.5e-4 deg²）；盆地间重叠 3 对（最大 0.0104 deg²，数字化
-  共享边界量级）；盆地总面积 16451 deg²（全球 25.39%）。
+- GST14_WGS84.XYZ (Bird & Mooney 2026 GST-1, downloaded from birdgeo.com): an
+  XYZ point grid of 4151521 data rows = 1441 latitude × 2881 longitude (a
+  globally complete grid registered at 0.125° gridline nodes, no missing
+  rows—4151521 = 1441×2881 holds exactly). Column-order pitfall (verified on
+  disk): the header says "Lon Lat meter",
+  but the actual data column order is Lat, Lon, meter (col1 is a constant
+  latitude increasing from -90 in steps of 0.125; col2 loops longitude
+  -180..180 in steps of 0.125)—take columns by position, never by header
+  name; first row measured (-90, -180). The ±180 columns are bit-identical (a
+  periodic duplicate copy; drop the +180 column, same as WGM2012); the ±90
+  pole rows are constant within the row (a single pole point). Value range
+  0..20118 m, no NaN—0 = no sediment is a real value (3.26% of cells), not
+  missing. Node→Voronoi cell interpretation: cell = node ±1/16°, pole-row
+  latitude clamped to half weight,
+  longitude wrapped at the date line.
+- evenick2021_global_basins.shp (Evenick 2021 ESR 215:103564): 768 Polygons =
+  764 basins (unique Basin UBI) + 4 date-line-crossing basins (Ross / Anadyr /
+  Hope / Khatyrka) each split into 2 parts (Split Poly=Yes, the two parts fall
+  on either side of the date line, no crossed edge within a part); the
+  split-part statistics columns (Max/Mean/Med Sed, Moho, Poly Area) are
+  per-part statistics, not basin-level (verified on disk: the two parts of the
+  same UBI differ in value)—the sidecar keeps the 768-row source granularity,
+  while the build burns the 768-part geometry (same-UBI parts have consistent
+  Basin Type, contract-ized).
+  EPSG:4326; Basin Type vocabulary of 8 classes (lexicographic encoding 1..8);
+  1 invalid geometry
+  (Komandorskaya self-intersection, make_valid repair = main component +
+  0.0002 deg² sliver,
+  area Δ=3.5e-4 deg²); 3 overlapping basin pairs (max 0.0104 deg², at the
+  magnitude of a shared digitized boundary); total basin area 16451 deg²
+  (25.39% of the globe).
 
-通道：
-- gst1_thickness（立方唯一沉积厚度层，克制原则筛选留一；GlobSed /
-  CRUST1.0 沉积层转验证参考）：两档 1°/30′ 保守核降采样
-  （conservative_overlap_mean，6′ 细于原生 0.125° 铁律禁止进入）；
-  源全覆盖无 NaN → validity 恒 1。
-- global_basins_class（internal）：主档 3′ 胞心栅格化（make_valid 修复
-面积降序后烧胜）+ 粗档 kernels.aggregate_mode 众数聚合（nodata=0
-不参与、平票取小、≥1 有效子胞即有值）。
-- global_basins_distance（internal）：区域距离语义——像元中心在任一
-  盆地多边形内 → 0；否则 = 到最近盆地边界段的球面大圆距离（km，IUGG
-  authalic R，层级环带候选剪枝逐档精确重算）。域内 0 覆写
-  在距离金字塔缓存内完成（逐档 inside 掩膜直接自矢量源栅格化，非跨档
-  降采样）。四档全域有值（免掩膜）。
+Channels:
+- gst1_thickness (the cube's only sediment-thickness layer, kept by the
+  restraint principle; the GlobSed /
+  CRUST1.0 sediment layers are relegated to validation reference): two tiers
+  1°/30′ conservative-kernel downsampling
+  (conservative_overlap_mean; 6′, being finer than the native 0.125°, is
+  forbidden by hard rule); full source coverage with no NaN → validity is
+  constantly 1.
+- global_basins_class (internal): home tier 3′ cell-center rasterization
+  (burning in descending area order after the make_valid repair) + coarse
+  tiers kernels.aggregate_mode majority aggregation (nodata=0 excluded, ties
+  take the smaller code, ≥1 valid subcell means the cell has a value).
+- global_basins_distance (internal): region-distance semantics—a cell center
+  inside any basin polygon → 0; otherwise = spherical great-circle distance to
+  the nearest basin boundary segment (km, IUGG
+  authalic R, exact per-tier recomputation with hierarchical ring-band
+  candidate pruning). The in-domain 0 overwrite
+  is done within the distance pyramid cache (per-tier inside masks rasterized
+  directly from the vector source, not downsampled across tiers). All four
+  tiers have values everywhere (mask-free).
 
-许可：
-- GST1：源（birdgeo.com 下载）无明示许可，不纳入公开版。
-- Global Basins：源许可 CC BY-NC-ND 4.0（ND 条款限制衍生再分发）→
-两层 + 侧车 visibility=internal，不纳入公开版；论文建议读者直接
-联用原源（Evenick 2021 补充材料）。
+License:
+- GST1: source (downloaded from birdgeo.com) has no explicit license, not
+  included in the public edition.
+- Global Basins: source license CC BY-NC-ND 4.0 (the ND clause restricts
+  derivative redistribution) → both
+  layers + sidecar visibility=internal, not included in the public edition; the
+  paper advises readers to directly
+  use the original source (Evenick 2021 supplementary material).
 """
 
 import json
@@ -69,7 +90,7 @@ XYZ_NAME = "GST14_WGS84.XYZ"
 BASINS_SRC_DIR = REPO_ROOT / "original data/sediment/global-basins/shapefile"
 BASINS_SHP_NAME = "evenick2021_global_basins.shp"
 
-GST1_DOI = "10.1016/j.tecto.2026.231175"        # Bird & Mooney 2026, Tectonophysics 929:231175（refs PDF 自证）
+GST1_DOI = "10.1016/j.tecto.2026.231175"
 EVENICK2021_DOI = "10.1016/j.earscirev.2021.103564"
 GST1_URL = "http://birdgeo.com/gst-1.htm"
 
@@ -81,10 +102,8 @@ GST1_TIERS = ("1deg", "30min")
 BASINS_HOME_TIER = "3min"
 BASINS_DISTANCE_CHAIN = ("1deg", "30min", "6min", "3min")
 
-# GST1 读取期几何断言常量（测试可 monkeypatch 缩格，gravmag 同款约定）
 GST1_EXPECTED = {"shape": (1441, 2881), "spacing": Fraction(1, 8)}
 
-# 盆地类型词汇表（磁盘实测 8 类，字典序固定编码 1..8；0 = 无盆地）。
 BASIN_TYPE_CODES: dict[str, int] = {
     label: i for i, label in enumerate(sorted([
         "Backarc - Marginal Sea", "Fold and Thrust Belt", "Forearc",
@@ -92,11 +111,11 @@ BASIN_TYPE_CODES: dict[str, int] = {
     ]), start=1)
 }
 
-EXPECTED_POLYGONS = 768       # 源多边形行数（含 4 盆地 × 2 拆分片）
-EXPECTED_BASINS = 764         # 唯一 Basin UBI
-EXPECTED_SPLIT_BASINS = 4     # 跨日期线拆分片盆地（Ross/Anadyr/Hope/Khatyrka）
-EXPECTED_INVALID = 1          # Komandorskaya 自交（make_valid 修复契约）
-NODATA = 0                    # 整型类别层缺测哨兵（编码自 1 起）
+EXPECTED_POLYGONS = 768
+EXPECTED_BASINS = 764
+EXPECTED_SPLIT_BASINS = 4
+EXPECTED_INVALID = 1
+NODATA = 0
 
 GST1_LICENSE_NOTE = (
     "GST-1 源（birdgeo.com 下载）无明示许可；不纳入公开版。"
@@ -117,23 +136,26 @@ GST1_UNIT_BASIS = (
 
 
 def basin_type_encoding() -> dict[str, str]:
-    """盆地类型编码表（码 → 语义），attrs/manifest/sidecar 共用唯一来源。"""
+    """Basin-type encoding table (code → semantics), the single source shared
+    by attrs/manifest/sidecar."""
     return {
         str(c): label
         for label, c in sorted(BASIN_TYPE_CODES.items(), key=lambda kv: kv[1])
     }
 
 
-# ---------------- GST1 源读取（契约化） ----------------
 
 def load_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
-    """读 GST14_WGS84.XYZ → 规范化源（节点→Voronoi 胞解释）。
+    """Read GST14_WGS84.XYZ → normalized source (node→Voronoi cell
+    interpretation).
 
-    契约（磁盘实证的契约化）：表头 token = "Lon Lat meter"（列序陷阱载体
-    ——数据列序为 Lat, Lon, meter，按位置取列）；数据行数 = 1441×2881；
-    首行 (lat, lon) = (-90, -180)；行内纬度常值、行间步进 0.125 自 -90；
-    行内经度 -180..180 步 0.125；±180 列逐位相同（周期重复）；±90 极点
-    行行内常值。源变更须复评解析。
+    Contract (contract-ized disk verification): header token = "Lon Lat meter"
+    (the column-order pitfall carrier—the data order is Lat, Lon, meter; take
+    columns by position); data row count = 1441×2881; first row (lat, lon) =
+    (-90, -180); latitude constant within a row, stepping 0.125 between rows
+    from -90; longitude within a row -180..180 in steps of 0.125; the ±180
+    columns are bit-identical (periodic duplicate); the ±90 pole rows are
+    constant within the row. Any source change requires re-reviewing the parse.
     """
     import pandas as pd
 
@@ -158,19 +180,16 @@ def load_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
         raise ValueError(
             f"{XYZ_NAME}: 数据行数 {len(df)} ≠ {nlat}×{nlon}（源变更须复评）"
         )
-    # 列序陷阱：col1=纬度、col2=经度、col3=厚度（按位置）
     lat = df["col1"].to_numpy()
     lon = df["col2"].to_numpy()
     g = df["col3"].to_numpy().reshape(nlat, nlon)
     lat_g = lat.reshape(nlat, nlon)
     lon_g = lon.reshape(nlat, nlon)
-    # 首行契约：预期 lat=-90, lon=-180
     if not (lat_g[0, 0] == -90.0 and lon_g[0, 0] == -180.0):
         raise ValueError(
             f"{XYZ_NAME}: 首行 ({lat_g[0, 0]}, {lon_g[0, 0]}) ≠ 预期 (-90, -180)"
             "（列序或网格变更须复评）"
         )
-    # 网格几何：行内纬度常值 + 纬度步进 + 行内经度模式（内循环）
     if not np.all(lat_g == lat_g[:, :1]):
         raise ValueError(f"{XYZ_NAME}: 行内纬度非常值（列序假设被破坏）")
     expect_lat = -90.0 + np.arange(nlat) * float(spacing)
@@ -181,15 +200,13 @@ def load_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
         raise ValueError(f"{XYZ_NAME}: 行内经度模式不一致（内循环假设被破坏）")
     if np.max(np.abs(lon_g[0] - expect_lon)) > 1e-9:
         raise ValueError(f"{XYZ_NAME}: 经度坐标偏离规则网格（首末 {lon_g[0, 0]}, {lon_g[0, -1]}）")
-    # ±180 周期重复列 + 极点行常值
     if not np.array_equal(g[:, 0], g[:, -1]):
         raise ValueError(f"{XYZ_NAME}: ±180 列不同值，周期重复假设被破坏")
     if np.unique(g[0]).size != 1 or np.unique(g[-1]).size != 1:
         raise ValueError(f"{XYZ_NAME}: 极点行行内非常值（极点单点假设被破坏）")
 
-    values = g[:, :-1].astype(np.float32)        # 弃 +180 重复列 → 2880
+    values = g[:, :-1].astype(np.float32)
     valid = np.isfinite(values)
-    # Voronoi 胞边：节点 ±半步长，极点行钳制半权（WGM2012 同款）
     lat_edges = -90.0 + (np.arange(nlat + 1, dtype=np.float64) - 0.5) * float(spacing)
     lat_edges[0], lat_edges[-1] = -90.0, 90.0
     return RasterSource(
@@ -210,13 +227,13 @@ def load_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
     )
 
 
-# ---------------- GST1 层构建 ----------------
 
 _SOURCE_CACHE: dict[str, RasterSource] = {}
 
 
 def _cached_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
-    """进程内源缓存：两档构建只读一次 ~116MB 源文件。"""
+    """In-process source cache: the two tiers read the ~116MB source file only
+    once."""
     key = f"gst1:{Path(src_dir).resolve()}"
     if key not in _SOURCE_CACHE:
         _SOURCE_CACHE[key] = load_gst1(src_dir)
@@ -224,7 +241,8 @@ def _cached_gst1(src_dir: str | Path = GST1_SRC_DIR) -> RasterSource:
 
 
 def build_gst1_thickness(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 sediment__gst1_thickness（立方唯一沉积厚度层，float32）。"""
+    """Build this tier's sediment__gst1_thickness (the cube's only
+    sediment-thickness layer, float32)."""
     src = _cached_gst1()
     values, _W = conservative_overlap_mean(
         src.values, src.valid, src.lat_edges, src.lon_res, tier_fraction(tier),
@@ -257,12 +275,13 @@ def build_gst1_thickness(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- Global Basins 源读取（契约化） ----------------
 
 def _polygonal_only(geom):
-    """make_valid 结果取面状组分（GeometryCollection 剔除零面积线/点残件）。
+    """Take the areal component of a make_valid result (a GeometryCollection
+    drops zero-area line/point remnants).
 
-    pb2002._polygonal_only 同款（模块内复制避免跨主题耦合）。
+    Same as pb2002._polygonal_only (copied within the module to avoid
+    cross-topic coupling).
     """
     from shapely.ops import unary_union
 
@@ -275,13 +294,17 @@ def _polygonal_only(geom):
 
 
 def load_global_basins(src_dir: str | Path = BASINS_SRC_DIR):
-    """读 evenick2021_global_basins.shp → (GeoDataFrame, 类型码数组, 修复几何列表)。
+    """Read evenick2021_global_basins.shp → (GeoDataFrame, type-code array,
+    repaired-geometry list).
 
-    契约（磁盘实证的契约化）：768 行、EPSG:4326、全部 Polygon、无空几何；
-    Basin Type 词汇 ⊆ 8 类编码表；764 唯一 Basin UBI、恰 4 盆地各 2 拆分片
-    且同 UBI 片类型一致（构建按片烧录的正确性前提）；环边 |Δlon|>180°
-    拒绝（源以拆片处理日期线，实证 0 条）；恰 1 个无效几何（Komandorskaya
-    自交）经 make_valid 修复为面状组分。源变更须复评。
+    Contract (contract-ized disk verification): 768 rows, EPSG:4326, all
+    Polygon, no empty geometry; Basin Type vocabulary ⊆ the 8-class encoding
+    table; 764 unique Basin UBI, exactly 4 basins each with 2 split parts and
+    consistent type across same-UBI parts (the correctness premise of burning
+    per part); ring-edge |Δlon|>180° rejected (the source handles the date line
+    by splitting, 0 such edges verified); exactly 1 invalid geometry
+    (Komandorskaya self-intersection) repaired to its areal component via
+    make_valid. Any source change requires re-reviewing.
     """
     import geopandas as gpd
     from shapely.validation import make_valid
@@ -303,7 +326,6 @@ def load_global_basins(src_dir: str | Path = BASINS_SRC_DIR):
     if n_ubi != EXPECTED_BASINS:
         raise ValueError(f"{BASINS_SHP_NAME}: 唯一盆地数 {n_ubi} ≠ 期望 {EXPECTED_BASINS}")
 
-    # 拆分片契约：恰 4 盆地各 2 片；同 UBI 片 Basin Type 一致
     split = [ubi for ubi, grp in gdf.groupby("Basin UBI") if len(grp) > 1]
     if len(split) != EXPECTED_SPLIT_BASINS or any(
         len(gdf[gdf["Basin UBI"] == ubi]) != 2 for ubi in split
@@ -317,7 +339,6 @@ def load_global_basins(src_dir: str | Path = BASINS_SRC_DIR):
         if grp["Basin Type"].nunique() != 1:
             raise ValueError(f"{BASINS_SHP_NAME}: 盆地 {ubi} 拆分片 Basin Type 不一致")
 
-    # 环边跨日期线拒绝（平面栅格化不安全；源以拆片处理，实证 0 条）
     for geom in gdf.geometry:
         for ring in _iter_rings(geom):
             xy = np.asarray(ring.coords)
@@ -327,7 +348,6 @@ def load_global_basins(src_dir: str | Path = BASINS_SRC_DIR):
                     "平面栅格化不安全）"
                 )
 
-    # 无效几何修复契约：恰 1 个（Komandorskaya 自交），make_valid 取面状组分
     invalid_mask = ~gdf.geometry.is_valid
     n_invalid = int(invalid_mask.sum())
     if n_invalid != EXPECTED_INVALID:
@@ -346,16 +366,15 @@ def load_global_basins(src_dir: str | Path = BASINS_SRC_DIR):
     return gdf, codes, geoms
 
 
-# ---------------- 通道一：global_basins_class（栅格化 + 众数聚合） ----------------
 
-_GEOMS_CACHE: dict[str, tuple] = {}          # 修复几何 + 类型码（构建/保真共用）
+_GEOMS_CACHE: dict[str, tuple] = {}
 _CLASS_HOME_CACHE: dict[str, tuple] = {}
 _CLASS_MODE_CACHE: dict[tuple, np.ndarray] = {}
 _INSIDE_CACHE: dict[tuple, np.ndarray] = {}
 
 
 def _basins_geoms(src_dir: str | Path = BASINS_SRC_DIR):
-    """修复几何 + 类型码（进程内缓存）。"""
+    """Repaired geometries + type codes (in-process cache)."""
     key = f"basins:{Path(src_dir).resolve()}"
     cache = _GEOMS_CACHE.get(key)
     if cache is None:
@@ -366,7 +385,7 @@ def _basins_geoms(src_dir: str | Path = BASINS_SRC_DIR):
 
 
 def _home_tier_classes(src_dir: str | Path = BASINS_SRC_DIR):
-    """主档 3′ 类别网格 + 重叠/未覆盖计数（进程内缓存）。"""
+    """Home tier 3′ class grid + overlap/uncovered counts (in-process cache)."""
     key = f"basins:{Path(src_dir).resolve()}"
     cache = _CLASS_HOME_CACHE.get(key)
     if cache is None:
@@ -401,7 +420,8 @@ BASIN_RASTERIZATION_RULE = (
 
 
 def build_global_basins_class(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 sediment__global_basins_class（uint8 类别层，internal）。"""
+    """Build this tier's sediment__global_basins_class (uint8 class layer,
+    internal)."""
     values = _tier_classes(tier)
     lat, lon = tier_centers(tier)
     attrs = {
@@ -430,16 +450,15 @@ def build_global_basins_class(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 通道二：global_basins_distance（区域距离，域内 0） ----------------
 
-# 距离金字塔磁盘缓存（内存护栏：.npy mmap 机制；四档合计 ~131MB）
 _PYRAMID_CACHE_DIR = REPO_ROOT / "products/.build/global-basins-distance"
 
 _PYRAMID_CACHE: dict[str, dict[str, np.ndarray]] = {}
 
 
 def _tier_inside(tier: str, src_dir: str | Path = BASINS_SRC_DIR) -> np.ndarray:
-    """该档 inside 掩膜（胞心落入任一盆地片；直接自矢量源栅格化，逐档精确）。"""
+    """This tier's inside mask (cell center falls in any basin part;
+    rasterized directly from the vector source, exact per tier)."""
     key = (tier, str(Path(src_dir).resolve()))
     cache = _INSIDE_CACHE.get(key)
     if cache is None:
@@ -451,23 +470,29 @@ def _tier_inside(tier: str, src_dir: str | Path = BASINS_SRC_DIR) -> np.ndarray:
 
 
 def _basin_rings(geoms):
-    """修复几何 → 边界环列表（距离段表与保真共用唯一来源）。"""
+    """Repaired geometries → list of boundary rings (the single source shared by
+    the distance segment table and fidelity)."""
     return [ring for g in geoms for ring in _iter_rings(g)]
 
 
 def _distance_pyramid(src_dir: str | Path = BASINS_SRC_DIR) -> dict[str, np.ndarray]:
-    """盆地边界环段表 → {tier: 区域距离 float32 全球网格}（进程内缓存）。
+    """Basin boundary ring segment table → {tier: region-distance float32 global
+    grid} (in-process cache).
 
-    距离引擎逐档从矢量源精确重算边界距离（层级环带候选剪枝，
-    引理保证不漏候选）；随后逐档以 inside 掩膜（该档胞心直接自矢量源
-    栅格化）将域内像元覆写为 0 —— 区域距离语义（到最近盆地的距离，
-    域内 = 0）。
+    The distance engine recomputes boundary distances exactly per tier from the
+    vector source (hierarchical ring-band candidate pruning; a lemma guarantees
+    no missed candidates); then per tier the inside mask (that tier's cell
+    centers rasterized directly from the vector source) overwrites in-domain
+    cells to 0—region-distance semantics (distance to the nearest basin, in-domain
+    = 0).
 
-    缓存语义（与 faults 通道同款）：.npy 是内存护栏件（mmap 不驻留
-    RSS），非跨进程结果缓存——distance_grids 每次调用重算截写；真正的
-    复用是 _PYRAMID_CACHE 进程内字典（四档只算一次，build/保真同进程
-    共享）。覆写在 mmap 上 r+ 就地完成后重载只读（覆写幂等：0 → 0），
-    构建产物确定性不受影响。
+    Cache semantics (same as the faults channel): the .npy is a memory guard
+    (mmap does not reside in RSS), not a cross-process result cache—
+    distance_grids recomputes and rewrites on every call; the real reuse is the
+    in-process _PYRAMID_CACHE dict (the four tiers are computed only once,
+    shared by build/fidelity in the same process). The overwrite is done in
+    place with r+ on the mmap, then reloaded read-only (the overwrite is
+    idempotent: 0 → 0), so build-product determinism is unaffected.
     """
     key = f"basins:{Path(src_dir).resolve()}"
     if key not in _PYRAMID_CACHE:
@@ -501,7 +526,8 @@ BASIN_VALUE_CONVENTION = (
 
 
 def build_global_basins_distance(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 sediment__global_basins_distance（float32，全域有值，internal）。"""
+    """Build this tier's sediment__global_basins_distance (float32, values
+    everywhere, internal)."""
     values = _distance_pyramid()[tier]
     lat, lon = tier_centers(tier)
     attrs = {
@@ -524,9 +550,7 @@ def build_global_basins_distance(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
-# GST1 直方图几何（值域磁盘实证 0..20118 m，等宽 100 m bin）
 _GST1_HIST_SPEC = (0.0, 21000.0, 100.0)
 
 SEDIMENT_FIDELITY_LAYERS = {
@@ -535,17 +559,19 @@ SEDIMENT_FIDELITY_LAYERS = {
     BASIN_DISTANCE_LAYER_ID: {"kind": "distance"},
 }
 
-_SAMPLE_SEED = 20260913        # 抽样确定性（复跑同样本）
-_N_SAMPLES = 120              # 每档抽样像元数（分层：均匀 + 近场 + 域内）
-_DIST_TOL_KM = 1e-3           # 基础容差 1 m（近场公式异构 ~1e-5 km 量级）
-_DIST_REL_TOL = 3e-7          # 远场 float32 存储 ULP 主导：tol = max(1e-3, 3e-7·|d|)
+_SAMPLE_SEED = 20260913
+_N_SAMPLES = 120
+_DIST_TOL_KM = 1e-3
+_DIST_REL_TOL = 3e-7
 
 
 def _independent_region_distance_km(lat: float, lon: float, segs, tree, geoms) -> float:
-    """独立实现：shapely 点面包含（域内 → 0）+ 航空公式全段暴力（域外）。
+    """Independent implementation: shapely point-in-polygon (in-domain → 0) +
+    haversine formula brute force over all segments (out-of-domain).
 
-    与主实现刻意异构（栅格化 vs 矢量包含检验；3D 向量引擎 vs 半正矢
-    航空公式），供保真交叉验证。
+    Deliberately heterogeneous from the main implementation (rasterization vs
+    vector containment test; 3D vector engine vs haversine
+    formula), for fidelity cross-validation.
     """
     from shapely.geometry import Point
 
@@ -557,21 +583,27 @@ def _independent_region_distance_km(lat: float, lon: float, segs, tree, geoms) -
 
 
 def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -> dict:
-    """保真报告。
+    """Fidelity report.
 
-    gst1_thickness（重磁组同构）：① store 与源核重算逐位一致
-    （float32 位级，NaN 感知）；② 有效位 ⟺ 源掩膜复算 W>0；③ 积分
-    恒等式 Σ v·W = Σ v·w（源统计独立直算，gravmag_source_stats 复用）
-    + 分位数（fidelity_checks）；④ 覆盖率（报告制）。
+    gst1_thickness (isomorphic to the gravity-magnetics group): ① store
+    bit-for-bit consistent with the recomputation from the source kernel
+    (float32 bit-level, NaN-aware); ② valid flag ⟺ source-mask recomputation
+    W>0; ③ integral identity Σ v·W = Σ v·w (source statistics computed
+    independently, reusing gravmag_source_stats) + quantiles
+    (fidelity_checks); ④ coverage (report-only).
 
-    global_basins_class（plate_class 同构）：① store 与源栅格化/
-    众数重算逐位一致；② 粗档 = 主档 store 值众数聚合；③ 值域 ⊆ 编码表
-    ∪ {0}；④ 类别分布 + 覆盖率（报告制，盆地占全球 25.39% 非穷尽覆盖）。
+    global_basins_class (isomorphic to plate_class): ① store bit-for-bit
+    consistent with the source rasterization/majority recomputation; ② coarse
+    tier = majority aggregation of home-tier store values; ③ value range ⊆
+    encoding table ∪ {0}; ④ class distribution + coverage (report-only; basins
+    cover 25.39% of the globe, nonexhaustive coverage).
 
-    global_basins_distance（通道同构 + 域内语义）：⑤ 全域有限且 ≥ 0；
-    ⑥ 域内 ⟹ 0（inside 掩膜重算，硬判据）；⑦ 分层随机抽样（均匀 +
-    近场 <50 km + 域内）与独立实现（shapely 包含 + 航空公式全段暴力）
-    比对，tol = max(1e-3 km, 3e-7·|d|)（硬判据）；⑧ 距离分布（报告制）。
+    global_basins_distance (channel-isomorphic + in-domain semantics): ⑤ finite
+    and ≥ 0 everywhere; ⑥ in-domain ⟹ 0 (inside-mask recomputation, hard
+    criterion); ⑦ stratified random sampling (uniform + near-field <50 km +
+    in-domain) compared against the independent implementation (shapely
+    containment + haversine brute force over all segments), tol = max(1e-3 km,
+    3e-7·|d|) (hard criterion); ⑧ distance distribution (report-only).
     """
     kind = SEDIMENT_FIDELITY_LAYERS[layer_id]["kind"]
     checks: list[dict] = []
@@ -700,7 +732,6 @@ def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -
                 lat, lon = tier_centers(tier)
                 inside = _tier_inside(tier)
 
-                # ⑤ 全域有限且 ≥ 0（硬判据，免掩膜语义）
                 n_bad = int((~np.isfinite(v)).sum() + (v < 0).sum())
                 checks.append({
                     "name": f"{tier}: 全域有限且 ≥ 0（免掩膜语义）",
@@ -708,7 +739,6 @@ def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -
                     "summary": f"违法像元 {n_bad}（期望 0）",
                 })
 
-                # ⑥ 域内 ⟹ 0（硬判据，区域距离语义）
                 n_bad = int((v[inside] != 0).sum())
                 checks.append({
                     "name": f"{tier}: 域内像元距离 = 0（区域距离语义）",
@@ -716,7 +746,6 @@ def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -
                     "summary": f"域内非零像元 {n_bad}（期望 0；域内 {int(inside.sum())} 像元）",
                 })
 
-                # ⑦ 分层随机抽样 × 独立实现（包含检验 + 航空公式全段暴力）
                 n_flat = v.size
                 n_near = _N_SAMPLES // 3
                 near_idx = np.nonzero(((v > 0) & (v < 50.0)).ravel())[0]
@@ -763,7 +792,6 @@ def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -
                     ),
                 })
 
-                # ⑧ 距离分布（报告制）
                 checks.append({
                     "name": f"{tier}: 距离分布（报告制）",
                     "status": "report",
@@ -786,7 +814,7 @@ def build_sediment_fidelity_report(store_dir, layer_id: str, tiers: list[str]) -
     return {
         "layer": layer_id,
         "store": str(store_dir),
-        "integral_tolerance": INTEGRAL_TOL,   # 报告器统一字段（类别/距离层无积分量）
+        "integral_tolerance": INTEGRAL_TOL,
         "result": "FAIL" if n_fail else "PASS",
         "n_checks": len(checks),
         "checks": checks,

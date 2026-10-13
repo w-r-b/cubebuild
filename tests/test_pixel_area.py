@@ -1,4 +1,5 @@
-"""pixel_area 解析公式数值测试（外部行为：档位网格 × 公式自洽性）。"""
+"""pixel_area analytic-formula numeric tests (external behaviour: tier grid ×
+formula self-consistency)."""
 
 import numpy as np
 import pytest
@@ -19,7 +20,6 @@ def test_row_count_matches_grid(tier):
 
 @pytest.mark.parametrize("tier", TIER_ORDER)
 def test_global_sum_is_sphere_area(tier):
-    # 解析公式的面积守恒：全部像元之和 = 4πR²（地表总面积）
     nlat, nlon = grid_shape(tier)
     total = pixel_area_rows(tier).sum() * nlon
     target = 4.0 * np.pi * R**2
@@ -28,7 +28,6 @@ def test_global_sum_is_sphere_area(tier):
 
 @pytest.mark.parametrize("tier", TIER_ORDER)
 def test_hemisphere_symmetry(tier):
-    # A(-φ) = A(φ)：南北半球对称（容差=边缘浮点求值的舍入噪声）
     rows = pixel_area_rows(tier)
     np.testing.assert_allclose(rows, rows[::-1], rtol=1e-9)
 
@@ -38,14 +37,12 @@ def test_area_grows_toward_equator(tier):
     rows = pixel_area_rows(tier)
     nlat = len(rows)
     mid = nlat // 2
-    # 全档 nlat 为偶数：赤道是行边缘，最大值由跨赤道的一对行取得（数学上相等）
     assert int(np.argmax(rows)) in (mid - 1, mid)
-    assert np.all(np.diff(rows[:mid]) > 0)  # 严格递增至赤道行对
-    assert np.all(np.diff(rows[mid:]) < 0)  # 过赤道后严格递减
+    assert np.all(np.diff(rows[:mid]) > 0)
+    assert np.all(np.diff(rows[mid:]) < 0)
 
 
 def test_single_row_closed_form():
-    # 与闭式公式逐值核对（6min 档任取一行；赤道是行边缘，无行横跨）
     rows = pixel_area_rows("6min")
     edges = tier_edges_lat("6min")
     i = 100
@@ -57,7 +54,6 @@ def test_single_row_closed_form():
 
 
 def test_build_pixel_area_array_form():
-    # 构建器输出：dask 惰性、float32、行广播、坐标正确
     import dask.array
 
     entry_tiers = ("1deg",)
@@ -85,5 +81,5 @@ def test_build_pixel_area_array_form():
     rows = pixel_area_rows("1deg")
     vals = arr.values
     np.testing.assert_array_equal(vals[:, 0], rows.astype("float32"))
-    np.testing.assert_array_equal(vals[:, -1], vals[:, 0])  # 行内恒定
+    np.testing.assert_array_equal(vals[:, -1], vals[:, 0])
     assert arr.attrs["units"] == "km2"

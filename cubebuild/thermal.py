@@ -1,37 +1,57 @@
-"""热流主题：GHFDB+NGHF 合并去重点密度 + HFgrid14 预测网格。
+"""Heat-flow topic: GHFDB+NGHF merged deduplicated point density + HFgrid14
+prediction grid.
 
-源契约（磁盘实证）：
+Source contract (verified on disk):
 
-- GHFDB R2024 v.2026.03：IHFC_2024_GHFDB_v.2026.03.xlsx，sheet
-  "GHFDB R20024 v.2026.03"（源表名自带拼写错误，原样引用）。工作表
-  前 6 行为表头（P/C 码、M/R/O、B/S、U score、单位、长名），数据
-  91182 行 × 67 列，ID（R24-000001..）唯一。并存的 .txt 为空白分隔
-  且 5 条记录含内嵌换行（91200 物理行 ≠ 91182 记录，字段缺失致
-  token 数 13–166 不等、列对齐歧义）——解析以 xlsx 为权威（记录数
-  = R24-P 计数互证）。全 91182 条记录坐标/热流值可解析（无缺坐标
-  行；q_uncertainty "?" 占位转 NaN）。经度 ±180 制（含 2 条 lon=180）。
-  许可：CC BY 4.0（txt 头 # Licence 行 + datacite rightsList 自证）。
+- GHFDB R2024 v.2026.03: IHFC_2024_GHFDB_v.2026.03.xlsx, sheet
+  "GHFDB R20024 v.2026.03" (the source sheet name has its own typo, quoted
+  as-is). The worksheet's
+  first 6 rows are the header (P/C code, M/R/O, B/S, U score, unit, long name),
+  data
+  91182 rows × 67 columns, ID (R24-000001..) unique. The coexisting .txt is
+  blank-separated
+  and 5 records contain embedded newlines (91200 physical lines ≠ 91182
+  records; missing fields make the token count range 13–166 and the column
+  alignment ambiguous)—parsing takes the xlsx as authoritative (the record
+  count
+  = R24-P count, cross-checked). All 91182 records' coordinates/heat-flow
+  values are parseable (no missing-coordinate rows; the q_uncertainty "?"
+  placeholder becomes NaN). Longitude in ±180 convention (including 2 rows with
+  lon=180).
+  License: CC BY 4.0 (self-verified via the txt header # Licence line +
+  datacite rightsList).
 
-- NGHF.csv（Lucazeau 2019 SI-S02）：69729 逻辑记录 × 25 列（csv
-  模块与 pandas 互证；1 条记录站名含内嵌换行 → 物理行 69731）。2 条
-  经度空（YENDI / AV-950）→ 可定位 69727；q 非数值 350（密度层不
-  消费 q）。经度 ±180 制（含 180.0）。
-- HFgrid14.csv（Lucazeau 2019 SI-S01，"preferred heat flow prediction
-  map"）：分号分隔 259200 行 = 360 纬 × 720 经完整 0.5° 全球网格；
-  列名 "longiyude"（源文件拼写错误，原样引用）。中心 -89.75..89.75
-  步 0.5（北起）与 -179.75..179.75（-180 基准），均为二进制精确的
-  0.25 偏移值。HF_pred 全球全覆盖无缺测（-6.0..2977.4 mW/m²，含
-  少量物理上非正的模型值——作者原产品保真不动）；sHF_pred 不确定度
-  与 Hf_obs（12663 胞观测均值）不 ingest（观测通道由密度层承担）。
+- NGHF.csv (Lucazeau 2019 SI-S02): 69729 logical records × 25 columns
+  (cross-verified by the csv module and pandas; 1 record has an embedded
+  newline in its site name → 69731 physical lines). 2 longitudes empty
+  (YENDI / AV-950) → 69727 locatable; q non-numeric 350 (the density layer does
+  not consume q). Longitude in ±180 convention (including 180.0).
+- HFgrid14.csv (Lucazeau 2019 SI-S01, "preferred heat flow prediction
+  map"): semicolon-separated 259200 rows = 360 latitude × 720 longitude complete
+  0.5° global grid;
+  the column name "longiyude" (a source-file typo, quoted as-is). Centers
+  -89.75..89.75
+  step 0.5 (north first) and -179.75..179.75 (-180 basis), all binary-exact
+  0.25 offset values. HF_pred covers the globe fully with no missing values
+  (-6.0..2977.4 mW/m², including
+  a few physically non-positive model values—the author's original product kept
+  faithfully); the sHF_pred uncertainty
+  and Hf_obs (12663 cells of observed means) are not ingested (the observation
+  channel is carried by the density layer).
 
-GHFDB↔NGHF 整编核实（磁盘数值实证）：
-NGHF 可定位 69727 点中 53394（76.6%）与 GHFDB 记录坐标圆整 4 位小数后
-重合，其中 43785（82.1%）同坐标 q 值差 ≤0.01 mW/m²（同观测整编
-证据）；64541（92.6%）落于 GHFDB 占用 0.1° 像元。结论：GHFDB 整编
-了 NGHF 主体但未完全（5186 点在 0.1° 像元层面缺席，来源集中于
-Rolandonne2020 等 GHFDB 未收录 compilation）——按规则执行合并
-去重，NGHF 不整体转验证参考；被 0.1° 规则滤除的 64541 点保留在
-original data/ 供验证参考（density 层的验证通道）。
+GHFDB↔NGHF incorporation check (numerical disk verification):
+of the 69727 locatable NGHF points, 53394 (76.6%) coincide with GHFDB record
+coordinates after rounding to 4 decimals,
+of which 43785 (82.1%) have the same-coordinate q difference ≤0.01 mW/m² (same
+observation incorporation
+evidence); 64541 (92.6%) fall in GHFDB-occupied 0.1° cells. Conclusion: GHFDB
+incorporated the bulk of NGHF but not fully (5186 points are
+absent at the 0.1° cell level, source concentrated in
+Rolandonne2020 and other compilations not included in GHFDB)—the deduplicated
+merge is executed by rule, and NGHF is not wholly turned into validation
+reference; the 64541 points filtered out by the 0.1° rule are kept in
+original data/ for validation reference (the density layer's validation
+channel).
 """
 
 from fractions import Fraction
@@ -58,7 +78,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 HEATFLOW_SRC_DIR = REPO_ROOT / "original data/thermal/heatflow"
 GHFDB_SRC_DIR = HEATFLOW_SRC_DIR / "ghfdb2024/GHFBD-R2024_v.2026-03"
 GHFDB_XLSX_NAME = "IHFC_2024_GHFDB_v.2026.03.xlsx"
-GHFDB_SHEET = "GHFDB R20024 v.2026.03"          # 源表名拼写（R20024）原样引用
+GHFDB_SHEET = "GHFDB R20024 v.2026.03"
 NGHF_SRC_DIR = (
     HEATFLOW_SRC_DIR / "lucazeau2019/2019gc008389-sup-0004-data_set_si-s02"
 )
@@ -73,28 +93,25 @@ HFGRID_CSV_NAME = "HFgrid14.csv"
 HEATFLOW_DENSITY_ID = "thermal__heatflow_density"
 HFGRID14_ID = "thermal__hfgrid14_heatflow"
 
-GHFDB_DOI = "10.5880/fidgeo.2024.014"           # GHFDB R2024（txt 头 Citation 自证）
+GHFDB_DOI = "10.5880/fidgeo.2024.014"
 LUCAZEAU_DOI = "10.1029/2019GC008389"           # Lucazeau 2019, G³
 
-# 源契约常量（磁盘实证的契约化；源变更即读取期显式失败）
 GHFDB_EXPECTED_ROWS = 91182
 GHFDB_EXPECTED_COLS = 67
 NGHF_EXPECTED_ROWS = 69729
 NGHF_EXPECTED_COLS = 25
 NGHF_EXPECTED_LOCATABLE = 69727
 HFGRID_ROWS = 259200                             # 360 × 720
-HFGRID_HALF = Fraction(1, 2)                     # 0.5° 源分辨率（精确有理数）
+HFGRID_HALF = Fraction(1, 2)
 
-# 合并去重：0.1° 像元容差
 PIX_TOL_DEG = 0.1
-NGHF_SUPPLEMENT = 5186                           # 不落 GHFDB 像元的 NGHF 可定位点
+NGHF_SUPPLEMENT = 5186
 MERGED_TOTAL = GHFDB_EXPECTED_ROWS + NGHF_SUPPLEMENT   # 96368
 
-# 整编核实期望值（实证；源更新漂移即保真 FAIL 提示复核）
-NGHF_EXACT_COORD_MATCHES = 53394                 # 坐标 4 位小数精确重合
-NGHF_Q_IDENTICAL = 43785                         # 同坐标 |Δq| ≤ 0.01（可比对 53309）
-NGHF_Q_COMPARABLE = 53309                        # 同坐标且双方 q 可解析
-NGHF_PIXEL_OVERLAP = 64541                       # 落于 GHFDB 占用 0.1° 像元
+NGHF_EXACT_COORD_MATCHES = 53394
+NGHF_Q_IDENTICAL = 43785
+NGHF_Q_COMPARABLE = 53309
+NGHF_PIXEL_OVERLAP = 64541
 
 COMPOSITE_RULE = (
     "GHFDB 为主（全部 91182 条记录），NGHF 仅补不与任何 GHFDB 记录同落 "
@@ -128,14 +145,15 @@ _LICENSE_NOTE = (
 )
 
 
-# ---------------- 源读取 ----------------
 
 def load_ghfdb(src_dir: str | Path = GHFDB_SRC_DIR):
-    """读 GHFDB xlsx → tidy DataFrame（q/q_uncertainty/name/lat/lon/reference/id）。
+    """Read the GHFDB xlsx → tidy DataFrame
+    (q/q_uncertainty/name/lat/lon/reference/id).
 
-    契约：工作表 (91182+6) × 67、长名行含所需列且无重复、ID 唯一、
-    lat/lon 全可解析（缺坐标即显式失败——与 WSM/GSRM 的空坐标容忍不同，
-    本源实证无缺坐标行）。
+    Contract: worksheet (91182+6) × 67, the long-name row contains the required
+    columns with no duplicates, ID unique, lat/lon all parseable (a missing
+    coordinate fails explicitly—unlike the empty-coordinate tolerance of
+    WSM/GSRM, this source is verified to have no missing-coordinate rows).
     """
     import pandas as pd
 
@@ -174,11 +192,13 @@ def load_ghfdb(src_dir: str | Path = GHFDB_SRC_DIR):
 
 
 def load_nghf(src_dir: str | Path = NGHF_SRC_DIR):
-    """读 NGHF.csv → tidy DataFrame（同 GHFDB 列名口径 + source_row 原行号）。
+    """Read NGHF.csv → tidy DataFrame (same column naming as GHFDB +
+    source_row original row number).
 
-    契约：69729 × 25；坐标/heat-flow 列以 to_numeric 解析（2 条经度空
-    → NaN，落格端处理）；keep_default_na=False 保留字面字符串（含
-    HFC 码等），空字段再显式转 NaN。
+    Contract: 69729 × 25; the coordinate/heat-flow columns are parsed with
+    to_numeric (2 empty longitudes → NaN, handled at the grid-assignment end);
+    keep_default_na=False preserves literal strings (including HFC codes etc.),
+    then empty fields are explicitly converted to NaN.
     """
     import pandas as pd
 
@@ -210,11 +230,14 @@ def load_nghf(src_dir: str | Path = NGHF_SRC_DIR):
 
 
 def load_hfgrid14(src_dir: str | Path = HFGRID_SRC_DIR) -> RasterSource:
-    """读 HFgrid14.csv → 规范化源（行 0 = -90 侧、列 0 = -180 侧）。
+    """Read HFgrid14.csv → normalized source (row 0 = -90 side, column 0 = -180
+    side).
 
-    断言（磁盘实证的契约化）：259200 行完整网格（每 (lat,lon) 恰一行；
-    中心恰为 0.25 偏移精确值，searchsorted 回读逐位相等即配准自证）、
-    HF_pred 全球全覆盖有限（无缺测——作者预测场特性）。
+    Assertions (contract-ized disk verification): 259200 rows forming a complete
+    grid (exactly one row per (lat,lon); the center is exactly a 0.25 offset
+    exact value, with searchsorted read-back bit-for-bit equal, i.e.
+    registration self-verification), HF_pred finite and globally full-coverage
+    (no missing values—a property of the author's prediction field).
     """
     import pandas as pd
 
@@ -253,7 +276,7 @@ def load_hfgrid14(src_dir: str | Path = HFGRID_SRC_DIR) -> RasterSource:
         valid=np.isfinite(values),
         lat_edges=lat_edges,
         lon_res=HFGRID_HALF,
-        lon_phase=HFGRID_HALF / 2,                # 0.25° 偏移中心 = 边缘对齐 -180
+        lon_phase=HFGRID_HALF / 2,
         attrs={
             "registration_rule": (
                 "pixel 注册（0.5° 中心 -89.75..89.75 / -179.75..179.75，"
@@ -266,16 +289,21 @@ def load_hfgrid14(src_dir: str | Path = HFGRID_SRC_DIR) -> RasterSource:
     )
 
 
-# ---------------- 合并去重 + 整编核实 ----------------
 
 def pixel_keys(lat, lon, res: float = PIX_TOL_DEG) -> np.ndarray:
-    """0.1° 像元键（左闭分区；经度先卷绕 [-180, 180)）。
+    """0.1° cell key (left-closed binning; longitude first wrapped to
+    [-180, 180)).
 
-    合并去重规则与整编核实共用的唯一实现（行 0 = -90 侧）。
-    边界鲁棒性：坐标先 round((x+off)/res, 6) 再 floor——裸除法
-    (x+off)/res 对恰在像元边界的十进制坐标（如 23.3）会产生
-    1132.999…/1133.000… 的浮点噪声，非确定落邻胞（实证 69727 点中
-    3808 点受扰）；先舍入到 6 位小数使边界点按左闭约定确定性归胞。
+    The single implementation shared by the deduplicated merge rule and the
+    incorporation check (row 0 = -90 side).
+    Boundary robustness: coordinates are first round((x+off)/res, 6) then
+    floor—raw division
+    (x+off)/res, for decimal coordinates lying exactly on a cell boundary (e.g.
+    23.3), produces
+    1132.999…/1133.000… floating-point noise and lands non-deterministically in
+    the neighboring cell (verified: 3808 of 69727 points affected); rounding to
+    6 decimals first makes boundary points land deterministically by the
+    left-closed convention.
     """
     lat = np.asarray(lat, dtype=np.float64)
     lon_w = wrap_lon180(lon)
@@ -292,12 +320,14 @@ _HOME_CACHE: dict[str, np.ndarray] = {}
 
 def merge_heatflow_points(ghfdb_src: str | Path = GHFDB_SRC_DIR,
                           nghf_src: str | Path = NGHF_SRC_DIR):
-    """规则：GHFDB 为主 + NGHF 补充不落 GHFDB 0.1° 像元的可定位点。
+    """Rule: GHFDB primary + NGHF supplementing the locatable points not falling
+    into GHFDB 0.1° cells.
 
-    返回统一口径 DataFrame（source/source_row/name/lat/lon/q/
-    q_uncertainty/reference）：GHFDB 91182 全记录 + NGHF 5186 补充
-    = 96368；计数与 MERGED_TOTAL 契约互证（源漂移即显式失败）。
-    进程内缓存（xlsx 读取 ~1 分钟，四档只读一次）。
+    Returns a unified-schema DataFrame (source/source_row/name/lat/lon/q/
+    q_uncertainty/reference): GHFDB 91182 all records + NGHF 5186 supplement
+    = 96368; the count and MERGED_TOTAL cross-verify by contract (a source drift
+    fails explicitly). In-process cache (xlsx reading takes ~1 minute; the four
+    tiers read only once).
     """
     import pandas as pd
 
@@ -350,18 +380,19 @@ def merge_heatflow_points(ghfdb_src: str | Path = GHFDB_SRC_DIR,
 
 def verify_nghf_incorporation(ghfdb_src: str | Path = GHFDB_SRC_DIR,
                               nghf_src: str | Path = NGHF_SRC_DIR) -> dict:
-    """整编核实：三项磁盘数值证据（确定性，随源固定）。
+    """Incorporation check: three pieces of numerical disk evidence
+    (deterministic, fixed with the source).
 
-    ① 坐标 4 位小数精确重合数（NGHF 坐标 4 位小数、GHFDB 最多 9 位，
-       重合 = 同一观测被 GHFDB 收录的强证据）；
-    ② 同坐标 q 值一致性（|Δq| ≤ 0.01 视为逐位相同）；
-    ③ 0.1° 像元重叠数（合并规则的实际滤除量）。
+    ① the number of exact coordinate matches at 4 decimals (NGHF coordinates to
+       4 decimals, GHFDB to at most 9; a match = strong evidence the same
+       observation was incorporated by GHFDB);
+    ② same-coordinate q-value consistency (|Δq| ≤ 0.01 treated as bit-identical);
+    ③ the 0.1° cell overlap count (the actual filtered amount of the merge rule).
     """
     g = load_ghfdb(ghfdb_src)
     n = load_nghf(nghf_src)
     ok_n = n["lat"].notna() & n["lon"].notna()
 
-    # ①② 精确坐标匹配（GHFDB 同坐标多记录取最小 |Δq|）
     gmap: dict[tuple, list[int]] = {}
     g_lat = g["lat"].to_numpy()
     g_lon = g["lon"].to_numpy()
@@ -385,7 +416,6 @@ def verify_nghf_incorporation(ghfdb_src: str | Path = GHFDB_SRC_DIR,
             if min(abs(n_q[j] - v) for v in gqs) <= 0.01:
                 q_identical += 1
 
-    # ③ 像元重叠
     g_keys = set(pixel_keys(g_lat, g_lon).tolist())
     overlap = int(np.isin(
         pixel_keys(n_lat, n_lon), list(g_keys)
@@ -404,7 +434,8 @@ def verify_nghf_incorporation(ghfdb_src: str | Path = GHFDB_SRC_DIR,
 
 def heatflow_home_density(ghfdb_src: str | Path = GHFDB_SRC_DIR,
                           nghf_src: str | Path = NGHF_SRC_DIR) -> np.ndarray:
-    """主档密度：合并点集全 96368 行（全部可定位，构造性保证）。"""
+    """Home-tier density: all 96368 merged point-set rows (all locatable,
+    guaranteed by construction)."""
     key = f"home:{Path(ghfdb_src).resolve()}|{Path(nghf_src).resolve()}"
     if key not in _HOME_CACHE:
         df = merge_heatflow_points(ghfdb_src, nghf_src)
@@ -414,10 +445,10 @@ def heatflow_home_density(ghfdb_src: str | Path = GHFDB_SRC_DIR,
     return _HOME_CACHE[key]
 
 
-# ---------------- 层构建 ----------------
 
 def build_heatflow_density(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 thermal__heatflow_density（uint32 计数层，免掩膜）。"""
+    """Build this tier's thermal__heatflow_density (uint32 count layer,
+    mask-free)."""
     return density_dataarray(
         entry, tier, heatflow_home_density(),
         "热流观测点密度（GHFDB 2024 + NGHF 合并去重点集，每像元记录数）",
@@ -441,7 +472,8 @@ def _hfgrid14_source(src_dir: str | Path = HFGRID_SRC_DIR) -> RasterSource:
 
 
 def build_hfgrid14_heatflow(entry: LayerEntry, tier: str) -> xr.DataArray:
-    """构建该档 thermal__hfgrid14_heatflow（模型产品，非观测）。"""
+    """Build this tier's thermal__hfgrid14_heatflow (a model product, not an
+    observation)."""
     src = _hfgrid14_source()
     values, _W = conservative_overlap_mean(
         src.values, src.valid, src.lat_edges, src.lon_res, tier_fraction(tier),
@@ -472,9 +504,7 @@ def build_hfgrid14_heatflow(entry: LayerEntry, tier: str) -> xr.DataArray:
     )
 
 
-# ---------------- 保真验证（本层自供） ----------------
 
-# HF_pred 值域 -6..2977.4 mW/m²（磁盘实证）→ 直方图几何（-10, 3000, 1）
 THERMAL_LAYERS = {
     HEATFLOW_DENSITY_ID: {
         "kind": "density",
@@ -492,7 +522,8 @@ THERMAL_LAYERS = {
 
 
 def _incorporation_checks(ghfdb_src, nghf_src) -> list[dict]:
-    """整编核实：证据数字硬判据 + 结论报告。"""
+    """Incorporation check: hard criteria on the evidence numbers + a
+    conclusion report."""
     ev = verify_nghf_incorporation(ghfdb_src, nghf_src)
     pairs = (
         ("坐标圆整 4 位小数后重合", ev["exact_coord_matches"], NGHF_EXACT_COORD_MATCHES),
@@ -516,7 +547,6 @@ def _incorporation_checks(ghfdb_src, nghf_src) -> list[dict]:
     return checks
 
 
-# 双形态互补注记（密度层与连续场并列呈现、互补非冗余）
 _DUAL_FORM_NOTE = (
     "热流主题双形态互补非冗余：thermal__heatflow_density = 观测计数通道"
     "（GHFDB+NGHF 合并点集，uint32 免掩膜），thermal__hfgrid14_heatflow = "
@@ -527,11 +557,15 @@ _DUAL_FORM_NOTE = (
 
 def build_thermal_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                                    src_dir=None) -> dict:
-    """保真报告：密度层走计数判据（同构）+ 整编核实（新增）；
-    HFgrid14 走重磁组三层判据（逐位/有效位/积分+分位数）。
+    """Fidelity report: the density layer goes through count criteria
+    (isomorphic) + the incorporation check (newly added);
+    HFgrid14 goes through the gravity-magnetics group's three-layer criteria
+    (bit-for-bit/valid-flag/integral + quantiles).
 
-    src_dir：缺省按层解析（双源密度层给 heatflow 根目录，其下按常量的
-    相对结构解析 ghfdb/NGHF 子路径；HFgrid14 给其 SI-S01 目录）。
+    src_dir: resolved by layer by default (the dual-source density layer gets
+    the heatflow root directory, under which the ghfdb/NGHF subpaths are
+    resolved by the constants' relative structure; HFgrid14 gets its SI-S01
+    directory).
     """
     spec = THERMAL_LAYERS[layer_id]
     checks: list[dict] = []
@@ -642,7 +676,6 @@ def build_thermal_fidelity_report(store_dir, layer_id: str, tiers: list[str],
                     ),
                 })
 
-    # 双形态互补：两报告并列呈现，注记互补非冗余
     checks.append({
         "name": "双形态互补注记（报告制）",
         "status": "report",

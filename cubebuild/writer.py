@@ -1,8 +1,11 @@
-"""Zarr store 写入器：按档位分组的 Datatree。
+"""Zarr store writer: a Datatree grouped by tier.
 
-结构：根节点携带立方级 attrs；每个档位一个子节点（/1deg, /30min, ...），
-节点内 Dataset 坐标为该档 lat/lon 中心，变量为层 id 命名的数组。
-同档层共享坐标 → 严格配准（读入即可堆叠）。
+Structure: the root node carries cube-level attrs; each tier is a child node
+(/1deg, /30min, ...),
+the Dataset coordinates within a node are that tier's lat/lon centers, and the
+variables are arrays named by layer id.
+Same-tier layers share coordinates → strict registration (stackable upon
+reading).
 """
 
 import shutil
@@ -41,11 +44,14 @@ def assemble_datatree(
     tier_datasets: dict[str, xr.Dataset],
     group_datasets: dict[tuple[str, str], xr.Dataset] | None = None,
 ) -> DataTree:
-    """组装 Datatree：档位节点 + 3D 层组子节点。
+    """Assemble the Datatree: tier nodes + 3D layer-group child nodes.
 
-    group_datasets：{(tier, group_name): Dataset}——深度坐标互不相同
-    （289 vs 74 层）的 3D 模型层不能共存于档位节点（同一 Dataset 只能
-    有一套坐标），入子节点 /{tier}/{group}；组内共享该模型 depth 坐标。
+    group_datasets: {(tier, group_name): Dataset}—3D model layers with mutually
+    different depth coordinates
+    (289 vs 74 layers) cannot coexist in the tier node (the same Dataset can
+    have only
+    one set of coordinates), so they go into a child node /{tier}/{group}; the
+    group shares that model's depth coordinate.
     """
     nodes: dict[str, xr.Dataset] = {"/": xr.Dataset(attrs=build_root_attrs(contract))}
     for tier in contract.tiers:
@@ -53,7 +59,6 @@ def assemble_datatree(
             continue
         ds = tier_datasets[tier]
         if len(ds.data_vars) == 0:
-            # 骨架阶段也落空档位组，保持五档结构完整
             ds = xr.Dataset(attrs={"tier": tier})
         nodes[f"/{tier}"] = ds
         for (t, group), gds in sorted((group_datasets or {}).items()):
@@ -64,13 +69,13 @@ def assemble_datatree(
 
 
 def write_store(tree: DataTree, out_dir: str | Path) -> Path:
-    """写 Zarr v3 store（覆盖式：先清空目录，保证产物干净、可复跑）。"""
+    """Write a Zarr v3 store (overwrite-style: clear the directory first,
+    ensuring clean and rerunnable products)."""
     out_dir = Path(out_dir)
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     with warnings.catch_warnings():
-        # zarr3 的 consolidated metadata 实验性告警，与产物无关
         warnings.filterwarnings("ignore", message=".*Consolidated metadata.*")
         tree.to_zarr(out_dir, mode="w", zarr_format=3)
     return out_dir

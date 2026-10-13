@@ -1,20 +1,37 @@
-"""套件可收集性判据：导出产物（公开内容集）内测试套件可收集、可运行。
+"""Suite collectability criteria: the test suite inside the exported artifact
+(the public content set) is collectable and runnable.
 
-判据（对产物本体，经单一导出入口产到临时目录）：
-① 收集零错误——全套收集无 ERROR（收集期缺件不得报错）；
-② 运行仅通过与跳过——全套运行零失败零错误（重量级判据：约数分钟，含合成重算项）；
-③ 缺件即跳过——依赖被排除面（论文脚本）的模块在产物内整体跳过，且逐模块可辨
-   「因缺何件而跳过」（跳过行存在、原因非空、点名缺失件路径）；
-④ 守卫不误伤——私有仓内同一批模块的守卫条件不成立，测试照常运行（零触发）。
+Criteria (applied to the artifact itself, produced into a temp directory via the
+single export entry point):
+① Collection has zero errors -- the full suite collects with no ERROR (a missing
+   artifact at collection time must not raise an error);
+② Execution consists only of passes and skips -- the full suite runs with zero
+   failures and zero errors (a heavyweight criterion: several minutes, including
+   synthetic recomputation items);
+③ A missing artifact means skip -- modules depending on the excluded face (paper
+   scripts) are skipped wholesale inside the artifact, and per module it is
+   distinguishable "which missing artifact caused the skip" (the skip line
+   exists, the reason is non-empty, and it names the missing artifact path);
+④ Guards do not cause collateral damage -- inside the private repo the guard
+   condition does not hold for the same batch of modules, and the tests run as
+   usual (zero triggers).
 
-负例（守卫必须有效）：对产物内某守卫模块做定点手术（AST 定位、结构删块）——
-⑤ 去掉受保护导入（还原为裸导入）→ 收集即报错（判据①失败）；
-⑥ 只去掉模块级 skipif（受保护导入保留）→ 收集虽过、运行即失败（判据②失败）——
-   即收集与运行两条判据互补，缺一不可。
+Negative cases (the guards must be effective): perform targeted surgery on some
+guarded module inside the artifact (AST location, structural block removal) --
+⑤ remove the protected import (reverting it to a bare import) -> collection
+   immediately errors (criterion ① fails);
+⑥ remove only the module-level skipif (keeping the protected import) ->
+   collection passes but execution immediately fails (criterion ② fails) --
+   i.e. the collection and execution criteria are complementary and neither can
+   be omitted.
 
-依赖被排除面的模块由**受保护导入名 × paper/scripts 模块名**机械派生（不另
-设清单，防第二来源漂移）；派生集合为空即判失败（防空跑假绿）。私有侧导出
-机制不在本工作区时整体跳过（沿用缺件跳过惯例——公开仓不带导出自身逻辑）。
+Modules that depend on the excluded face are mechanically derived from the
+**protected import name x paper/scripts module name** (no separate manifest, to
+prevent a second source from drifting); an empty derived set is a failure (to
+prevent a vacuous run from turning falsely green). When the private-side export
+mechanism is not present in this workspace, the whole module is skipped
+(following the missing-artifact skip convention -- the public repo does not
+carry the export logic itself).
 """
 from __future__ import annotations
 
@@ -55,10 +72,9 @@ def artifact(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return out
 
 
-# ---------- 派生与运行助手 ----------
 
 def _guarded_import_names(src: str) -> set[str]:
-    """模块级受保护导入（try/except ImportError 块内）引用的模块名集合。"""
+    """Set of module names referenced by module-level protected imports (inside try/except ImportError blocks)."""
     names: set[str] = set()
     for node in ast.parse(src).body:
         if isinstance(node, ast.Try) and any(
@@ -73,13 +89,13 @@ def _guarded_import_names(src: str) -> set[str]:
 
 
 def _excluded_face_modules(tests_dir: Path) -> list[str]:
-    """依赖被排除面的测试模块 = 受保护导入引用 paper/scripts 模块者。"""
+    """Test modules depending on the excluded face = those whose protected imports reference a paper/scripts module."""
     return [p.name for p in sorted(tests_dir.glob("test_*.py"))
             if _guarded_import_names(p.read_text(encoding="utf-8")) & PAPER_SCRIPTS]
 
 
 def _guard_reasons(src: str) -> list[str]:
-    """模块级 skipif 守卫的原因串（AST 取 pytestmark 上 reason 关键字的值）。"""
+    """Reason strings of module-level skipif guards (obtained via AST from the value of the reason keyword on pytestmark)."""
     reasons: list[str] = []
     for node in ast.parse(src).body:
         if isinstance(node, ast.Assign) and any(
@@ -103,7 +119,7 @@ def _pytest(cwd: Path, args: list[str], timeout: int = 600) -> subprocess.Comple
 
 
 def _strip_import_guard(src: str) -> tuple[str, bool]:
-    """去掉受保护导入（还原为裸导入）：模块级 try/except ImportError 块 → 其 try 体。"""
+    """Remove the protected import (reverting it to a bare import): a module-level try/except ImportError block -> its try body."""
     for node in ast.parse(src).body:
         if isinstance(node, ast.Try) and any(
                 isinstance(h.type, ast.Name) and h.type.id == "ImportError"
@@ -115,7 +131,7 @@ def _strip_import_guard(src: str) -> tuple[str, bool]:
 
 
 def _strip_pytestmark(src: str) -> tuple[str, bool]:
-    """去掉模块级 skipif 守卫：pytestmark 赋值语句整段移除。"""
+    """Remove the module-level skipif guard: the entire pytestmark assignment statement is removed."""
     for node in ast.parse(src).body:
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "pytestmark" for t in node.targets):
@@ -124,12 +140,11 @@ def _strip_pytestmark(src: str) -> tuple[str, bool]:
     return src, False
 
 
-# 负例手术对象：单守卫代表模块（守卫形态与其余守卫模块一致；须落在派生集合内）
 SURGERY_SUBJECT = "test_translation_gate.py"
 
 
 def _mutate_module(artifact: Path, tmp_path: Path, name: str, mutate) -> Path:
-    """产物副本 + 对 name 模块的定点手术（守卫形态变了即显式失败）。"""
+    """Artifact copy + targeted surgery on module name (an explicit failure if the guard form has changed)."""
     mut = tmp_path / "mut"
     shutil.copytree(artifact, mut)
     target = mut / "tests" / name
@@ -140,17 +155,16 @@ def _mutate_module(artifact: Path, tmp_path: Path, name: str, mutate) -> Path:
     return mut
 
 
-# ---------- 判据本体（产物） ----------
 
 def test_artifact_collects_zero_errors(artifact: Path):
-    """① 产物内全套收集零错误。"""
+    """① The full suite inside the artifact collects with zero errors."""
     r = _pytest(artifact, ["--collect-only", "-q", "tests/"])
     assert r.returncode == 0, r.stdout + r.stderr
     assert not re.search(r"\d+ errors? during collection", r.stdout), r.stdout
 
 
 def test_artifact_full_suite_run_only_pass_or_skip(artifact: Path):
-    """② 产物内全套运行仅含通过与跳过（重量级：与私有全量套件的合成重算项重叠）。"""
+    """② The full suite inside the artifact runs with only passes and skips (heavyweight: overlaps with the synthetic recomputation items of the private full suite)."""
     r = _pytest(artifact, ["-q"], timeout=1800)
     tail = r.stdout[-2000:]
     assert r.returncode == 0, tail + r.stderr
@@ -160,14 +174,14 @@ def test_artifact_full_suite_run_only_pass_or_skip(artifact: Path):
 
 
 def test_artifact_excluded_face_modules_skip_with_visible_reason(artifact: Path):
-    """③ 依赖被排除面的模块在产物内整体跳过，且逐模块可辨「因缺何件而跳过」。"""
+    """③ Modules depending on the excluded face are skipped wholesale inside the artifact, and per module it is distinguishable "which missing artifact caused the skip"."""
     tests_dir = artifact / "tests"
     names = _excluded_face_modules(tests_dir)
     assert names, "产物内未派生到依赖被排除面的模块（判据空跑）"
     reasons = _guard_reasons_by_module(tests_dir, names)
     for n in names:
         assert reasons[n], f"{n} 缺模块级 skipif 守卫（应跳过而无守卫）"
-        for reason in reasons[n]:  # 跳过原因须点名缺失件（文件路径样）
+        for reason in reasons[n]:
             assert re.search(r"\S+\.py", reason), f"{n} 跳过原因未点名缺失件: {reason!r}"
     r = _pytest(artifact, ["-q", "-rs", *[f"tests/{n}" for n in names]])
     assert r.returncode == 0, r.stdout + r.stderr
@@ -180,7 +194,7 @@ def test_artifact_excluded_face_modules_skip_with_visible_reason(artifact: Path)
 
 
 def test_guards_do_not_false_skip_in_private_repo():
-    """④ 私有仓（论文侧齐备）内守卫条件不成立：测试照常运行，不予跳过。"""
+    """④ Inside the private repo (paper side complete) the guard condition does not hold: the tests run as usual and are not skipped."""
     names = _excluded_face_modules(REPO / "tests")
     assert names, "本仓未派生到依赖被排除面的模块（判据空跑）"
     reasons = _guard_reasons_by_module(REPO / "tests", names)
@@ -194,10 +208,9 @@ def test_guards_do_not_false_skip_in_private_repo():
     assert m and int(m.group(1)) > 0, r.stdout
 
 
-# ---------- 负例（守卫必须有效；对产物本体定点手术） ----------
 
 def test_negative_guard_import_stripped_collection_errors(artifact: Path, tmp_path: Path):
-    """⑤ 删掉受保护导入 → 缺件环境下收集即报错（判据①失败）。"""
+    """⑤ Remove the protected import -> under the missing-artifact environment collection immediately errors (criterion ① fails)."""
     assert SURGERY_SUBJECT in _excluded_face_modules(artifact / "tests")
     mut = _mutate_module(artifact, tmp_path, SURGERY_SUBJECT, _strip_import_guard)
     r = _pytest(mut, ["--collect-only", "-q", f"tests/{SURGERY_SUBJECT}"])
@@ -206,11 +219,11 @@ def test_negative_guard_import_stripped_collection_errors(artifact: Path, tmp_pa
 
 
 def test_negative_skipif_stripped_run_fails(artifact: Path, tmp_path: Path):
-    """⑥ 只去掉模块级 skipif → 收集虽过、运行即失败（判据②失败）。"""
+    """⑥ Remove only the module-level skipif -> collection passes but execution fails (criterion ② fails)."""
     assert SURGERY_SUBJECT in _excluded_face_modules(artifact / "tests")
     mut = _mutate_module(artifact, tmp_path, SURGERY_SUBJECT, _strip_pytestmark)
     collect = _pytest(mut, ["--collect-only", "-q", f"tests/{SURGERY_SUBJECT}"])
-    assert collect.returncode == 0, collect.stdout  # 此类缺陷收集判据抓不到
+    assert collect.returncode == 0, collect.stdout
     run = _pytest(mut, ["-q", f"tests/{SURGERY_SUBJECT}"])
     assert run.returncode != 0, run.stdout
     assert "failed" in run.stdout, run.stdout

@@ -1,18 +1,25 @@
-"""测试：球面大圆距离核（与独立航空公式互证）+ 层级环带引擎
-（对全段暴力路径位级比对）+ 线栅格化器（重叠规则/缺测语义）+ 侧车。
+"""Tests: spherical great-circle distance kernel (cross-validated against an independent
+aviation formula) + hierarchical annulus engine
+(bitwise comparison against the brute-force all-segments path) + line rasterizer
+(overlap rule / missing-data semantics) + sidecars.
 
-判据只测外部行为：
-- 距离核：中点 0 / 端点外延 / 垂直叉积 / 对跖端点分支，随机几何对
-  独立航空公式（半正矢+方位角，刻意异构实现）max|Δ| ≤ 1e-6 km；
-- 环带引擎：① 随机稀疏段全档位格网 == 全段暴力 min（引理无损的
-  直接验证，容差 1e-6 km——浮点结合序差异级别）；② 1° 胞任务对
-  全 5 档（含 30″）与暴力路径一致；
-- 栅格化器：线穿过像元烧录、重叠较短断裂胜（乱序传入同结果）、
-  slip_type 缺失（code 0）不烧录不计数；
-- 读取器：行数/词汇表/跨日期线/非 LineString 契约；
-- 真实源：基线（13696/23 类词汇/段表契约）+ 引擎胞任务实源抽检；
-- e2e（合成源）：双通道入 store → 结构验证 PASS → manifest 编码表/
-  validity 链接 → 保真报告 PASS（含距离抽样独立比对）。
+Checks test external behavior only:
+- distance kernel: midpoint 0 / endpoint extension / perpendicular cross product / antipodal
+  endpoint branch, random geometries vs the independent aviation formula (haversine + azimuth,
+  deliberately heterogeneous implementation) max|Δ| ≤ 1e-6 km;
+- annulus engine: (1) random sparse segments at all tiers == brute-force min over all segments
+  (direct verification that the lemma is lossless, tolerance 1e-6 km — the level of
+  floating-point summation-order differences); (2) a 1° cell task agrees with the brute-force
+  path across all 5 tiers (including 30″);
+- rasterizer: a line burns through the pixels it crosses, overlap goes to the shorter fault
+  (out-of-order input gives the same result), a missing
+  slip_type (code 0) is not burned and not counted;
+- reader: row count / vocabulary / dateline crossing / non-LineString contract;
+- real source: baseline (13696/23-class vocabulary/segment table contract) + engine cell-task
+  spot checks on the real source;
+- e2e (synthetic source): dual channel into the store → structural validation PASS →
+  manifest encoding table/
+  validity link → fidelity report PASS (including independent distance-sampling comparison).
 """
 
 import json
@@ -53,7 +60,7 @@ KM_PER_DEG = 2.0 * np.pi * EARTH_RADIUS_KM / 360.0
 
 @pytest.fixture(autouse=True)
 def _clear_fault_caches():
-    """模块级缓存跨测试隔离（合成源/真实源切换不脏读）。"""
+    """Module-level caches isolated across tests (synthetic/real source switching does not read stale data)."""
     import cubebuild.faults as f
 
     caches = (f._PYRAMID_CACHE, f._CLASS_CACHE, f._MODE_CACHE)
@@ -71,10 +78,9 @@ def _no_sidecars(monkeypatch):
     monkeypatch.setattr(cubebuild.cli, "SIDECARS", {})
 
 
-# ---------------- 编码表 ----------------
 
 def test_slip_type_encoding_table():
-    """编码表：23 类、码 1..23 字典序、category_encoding 往返一致。"""
+    """Encoding table: 23 classes, codes 1..23 in lexicographic order, category_encoding round-trip consistent."""
     assert len(SLIP_TYPE_CODES) == 23
     assert sorted(SLIP_TYPE_CODES.values()) == list(range(1, 24))
     enc = category_encoding()
@@ -84,7 +90,6 @@ def test_slip_type_encoding_table():
         assert enc[str(code)] == label
 
 
-# ---------------- 读取器：契约 ----------------
 
 def _fake_gdf(n, slip_types, geoms=None):
     import geopandas as gpd
@@ -125,7 +130,7 @@ def test_load_gem_faults_rejects_unknown_slip_type(tmp_path, monkeypatch):
 
 
 def test_load_gem_faults_rejects_slip_nan_drift(tmp_path, monkeypatch):
-    """slip_type 缺失数漂移（319 → 318）读取期即拒绝——源变更须复评。"""
+    """The count of missing slip_type drifts (319 → 318) and is rejected at read time — a source change requires re-evaluation."""
     n = EXPECTED_ROWS
     slips = ["Normal"] * (n - 318) + [None] * 318
     _patch_rows(monkeypatch, _fake_gdf(n, slips))
@@ -134,7 +139,7 @@ def test_load_gem_faults_rejects_slip_nan_drift(tmp_path, monkeypatch):
 
 
 def _slips_with_nan(n_classified):
-    """n 条 Normal + 319 条 None（满足 NaN 契约，让后续几何契约先过关）。"""
+    """n Normal + 319 None (satisfies the NaN contract, letting the subsequent geometry contract concern pass first)."""
     return ["Normal"] * n_classified + [None] * EXPECTED_SLIP_NAN
 
 
@@ -166,10 +171,9 @@ def test_load_gem_faults_rejects_multilinestring(tmp_path, monkeypatch):
         load_gem_faults(_fake_src(tmp_path))
 
 
-# ---------------- 距离核：已知几何 + 独立公式互证 ----------------
 
 def _equator_segment():
-    """赤道段 A=(0°,0°) → B=(0°,10°) 的段表。"""
+    """Segment table for the equator segment A=(0°,0°) → B=(0°,10°)."""
     from shapely.geometry import LineString
 
     return segment_table([LineString([(0.0, 0.0), (10.0, 0.0)])])[0]
@@ -183,16 +187,15 @@ def test_segment_distance_known_cases():
         p = _unit_vec(np.array([lat]), np.array([lon]))
         return float(_point_seg_dists(p, segs)[0, 0])
 
-    assert d(0.0, 5.0) == pytest.approx(0.0, abs=1e-9)          # 段上中点
-    assert d(0.0, 12.0) == pytest.approx(2.0 * km, abs=1e-6)     # B 端外延 → 端点距离
-    assert d(0.0, -3.0) == pytest.approx(3.0 * km, abs=1e-6)     # A 端外延
-    assert d(10.0, 5.0) == pytest.approx(10.0 * km, abs=1e-6)    # 垂直叉积
-    # 对跖点（(0,5) 的对跖 (0,-175)）：最近点 = 段两端点，175° 大圆
+    assert d(0.0, 5.0) == pytest.approx(0.0, abs=1e-9)
+    assert d(0.0, 12.0) == pytest.approx(2.0 * km, abs=1e-6)
+    assert d(0.0, -3.0) == pytest.approx(3.0 * km, abs=1e-6)
+    assert d(10.0, 5.0) == pytest.approx(10.0 * km, abs=1e-6)
     assert d(0.0, -175.0) == pytest.approx(175.0 * km, abs=1e-4)
 
 
 def test_segment_distance_vs_independent_random():
-    """随机段 + 随机点：引擎（3D 向量路径）vs 独立航空公式全段暴力。"""
+    """Random segments + random points: engine (3D vector path) vs the independent aviation formula over all segments."""
     rng = np.random.default_rng(42)
     from shapely.geometry import LineString
 
@@ -213,11 +216,11 @@ def test_segment_distance_vs_independent_random():
         assert abs(engine - indep) <= 1e-6, (lat, lon, engine, indep)
 
 
-# ---------------- 环带引擎：对全段暴力路径位级比对 ----------------
 
 def _random_segments(n, seed):
-    """随机短线段集（顶点数 2–5、步长 ≤ 3°，坐标域约束在 ±170/±78 内
-    保证漂移不越界）——覆盖近场/交叉/远场形态。"""
+    """Random short-segment set (2–5 vertices, step ≤ 3°, coordinate domain constrained within
+    ±170/±78 to guarantee drift stays in bounds) — covering near-field/crossing/far-field
+    forms."""
     from shapely.geometry import LineString
 
     rng = np.random.default_rng(seed)
@@ -236,11 +239,13 @@ def _random_segments(n, seed):
 
 
 def _brute_force_grid(segs, tier):
-    """独立暴力路径：该档全像元中心 → 全段 min（不经任何候选剪枝）。
+    """Independent brute-force path: all pixel centers at the tier → min over all segments (no
+    candidate pruning).
 
-    分块护栏：中间数组 ≈ 10×(block, n_seg) float64——block 500k × 40 段
-    ≈ 1.6GB 峰值（WSL 40GB 预算内）；block 必须随段数缩放（见
-    _min_dists_chunked 的实源分块）。
+    Chunking guardrail: the intermediate array ≈ 10×(block, n_seg) float64 — block 500k × 40
+    segments
+    ≈ 1.6GB peak (within the WSL 40GB budget); block must scale with the segment count (see
+    the real-source chunking in _min_dists_chunked).
     """
     lat, lon = tier_centers(tier)
     la, lo = np.meshgrid(lat, lon, indexing="ij")
@@ -253,11 +258,13 @@ def _brute_force_grid(segs, tier):
 
 
 def _min_dists_chunked(points: np.ndarray, segs, block: int = 32) -> np.ndarray:
-    """分块暴力 min（内存护栏：中间数组 ≈ 10×(block, n_seg) float64）。
+    """Chunked brute-force min (memory guardrail: the intermediate array ≈ 10×(block, n_seg)
+    float64).
 
-    实源 141k 段 × block 32 ≈ 360MB 峰值——WSL 40GB 预算内。不分块的
-    (14400, 141298) 矩阵 ≈ 160GB 是 OOM 炸弹（WSL 崩溃实证，
-    用户硬约束：长任务峰值 ≤40GB）。
+    Real source 141k segments × block 32 ≈ 360MB peak — within the WSL 40GB budget. The
+    unchunked
+    (14400, 141298) matrix ≈ 160GB is an OOM bomb (proven by WSL crash,
+    user hard constraint: long-task peak ≤40GB).
     """
     out = np.empty(points.shape[0], dtype=np.float64)
     for s in range(0, points.shape[0], block):
@@ -267,7 +274,7 @@ def _min_dists_chunked(points: np.ndarray, segs, block: int = 32) -> np.ndarray:
 
 
 def test_distance_grids_match_bruteforce_sparse():
-    """随机稀疏段（40 条）1°/30′ 全网格 == 全段暴力 min（引理无损验证）。"""
+    """Random sparse segments (40) over the 1°/30′ full grid == brute-force min over all segments (lemma-lossless verification)."""
     geoms = _random_segments(40, seed=7)
     segs, _ = segment_table(geoms)
     grids = distance_grids(segs, chain=("1deg", "30min"), workers=1)
@@ -281,10 +288,9 @@ def test_distance_grids_match_bruteforce_sparse():
 
 
 def test_distance_cell_matches_bruteforce_all_tiers():
-    """单 1° 胞全链任务（含 30″）对暴力路径——抽 3 个胞（近场/远场混合）。"""
+    """A single 1° cell full-chain task (including 30″) vs the brute-force path — 3 cells sampled (near-field/far-field mixture)."""
     geoms = _random_segments(25, seed=11)
     segs, _ = segment_table(geoms)
-    # 撒一条断层确保 (i=95, j=180) 附近有近场（段集随机性不保证命中）
     from shapely.geometry import LineString
 
     geoms2 = geoms + [LineString([(0.2, 5.2), (1.4, 5.8), (2.1, 6.3)])]
@@ -308,22 +314,23 @@ def test_distance_cell_matches_bruteforce_all_tiers():
 
 
 def test_annulus_widths_monotone():
-    """环带半宽随档位细化单调递减（引擎几何自检）。"""
+    """The annulus half-width decreases monotonically as tiers refine (engine geometry self-check)."""
     ws = [_ANNULUS_KM[t] for t in _TIER_CHAIN]
     assert all(a > b for a, b in zip(ws, ws[1:]))
 
 
-# ---------------- 线栅格化器 ----------------
 
 def test_rasterize_fault_classes_burn_and_overlap():
-    """3′ 档：横穿像元的线烧录其迹线；重叠像元取较短断裂（乱序同结果）；
-    slip_type 缺失（code 0）不烧录、不参与重叠计数。
+    """3′ tier: a line crossing a pixel burns its trace; overlapping pixels go to the shorter
+    fault (out-of-order gives the same result);
+    a missing slip_type (code 0) is not burned and does not participate in overlap counting.
 
-    几何避开胞边界：水平线 y=0.06（行 [0.05,0.10] 中心 0.075）、
-    x∈[0.01,0.29]（列中心 0.025..0.275）；垂直线 x=0.13（列 [0.10,0.15]
-    中心 0.125）、y∈[−0.04,0.14]（行中心 −0.025..0.125）；交叉点
-    (0.13, 0.06) 落在胞（中心 0.075, 0.125）内 → 该胞重叠，较短者
-    （垂直线 0.18° < 水平线 0.28°）胜出。
+    The geometry avoids cell boundaries: horizontal line y=0.06 (row [0.05,0.10] center 0.075),
+    x∈[0.01,0.29] (column centers 0.025..0.275); vertical line x=0.13 (column [0.10,0.15]
+    center 0.125), y∈[−0.04,0.14] (row centers −0.025..0.125); the crossing point
+    (0.13, 0.06) falls in the cell (center 0.075, 0.125) → that cell overlaps, and the shorter
+    one
+    (vertical line 0.18° < horizontal line 0.28°) wins.
     """
     from shapely.geometry import LineString
 
@@ -332,18 +339,15 @@ def test_rasterize_fault_classes_burn_and_overlap():
     classes, overlap = rasterize_fault_classes(
         [long_line, short_cross], np.array([5, 9], dtype=np.uint8), "3min"
     )
-    # 乱序传入 + 码随几何走 → 同结果（长度降序规则与传入顺序无关）
     classes2, overlap2 = rasterize_fault_classes(
         [short_cross, long_line], np.array([9, 5], dtype=np.uint8), "3min"
     )
     np.testing.assert_array_equal(classes, classes2)
     assert overlap == overlap2 >= 1
-    # 3′ 网格索引：行 r = (lat+90)/0.05−0.5、列 c = (lon+180)/0.05−0.5
-    r_cross, c_cross = 1801, 3602            # 胞心 (0.075, 0.125) —— 交叉胞
-    assert classes[r_cross, c_cross] == 9    # 重叠胞较短断裂（垂直线）胜
-    assert classes[1801, 3600] == 5           # 水平线独占胞（0.075, 0.025）
-    assert classes[1799, 3602] == 9          # 垂直线独占胞（−0.025, 0.125）
-    # code 0（slip_type 缺失）不烧录、不计数
+    r_cross, c_cross = 1801, 3602
+    assert classes[r_cross, c_cross] == 9
+    assert classes[1801, 3600] == 5
+    assert classes[1799, 3602] == 9
     classes3, overlap3 = rasterize_fault_classes(
         [long_line], np.array([0], dtype=np.uint8), "3min"
     )
@@ -351,10 +355,9 @@ def test_rasterize_fault_classes_burn_and_overlap():
 
 
 def test_rasterize_fault_classes_mode_aggregation():
-    """粗档众数聚合：30″ 合成主档 → 3′（因子 6）语义正确。"""
+    """Coarse-tier mode aggregation: a 30″ synthetic primary tier → 3′ (factor 6) is semantically correct."""
     from shapely.geometry import LineString
 
-    # 一条 30″ 档内斜线，跨越若干 3′ 块
     line = LineString([(0.0, 0.0), (0.1, 0.1)])
     classes, _ = rasterize_fault_classes(
         [line], np.array([4], dtype=np.uint8), "30sec"
@@ -363,19 +366,17 @@ def test_rasterize_fault_classes_mode_aggregation():
     assert coarse.shape == grid_shape("3min")
     assert set(np.unique(coarse)) <= {0, 4}
     assert (coarse != 0).sum() > 0
-    # 众数一致性：粗档有值 ⟺ 对应 6×6 块内有烧录
     blocks = classes.reshape(
         coarse.shape[0], 6, coarse.shape[1], 6
     ).any(axis=(1, 3))
     np.testing.assert_array_equal(coarse != 0, blocks)
 
 
-# ---------------- 真实源基线 ----------------
 
 @requires_gem
 def test_real_gem_baselines():
-    """磁盘实证契约化：13696 行、23 类词汇 + 319 NaN、LineString、
-    段表段角 < 90°。"""
+    """Disk evidence made contractual: 13696 rows, 23-class vocabulary + 319 NaN, LineString,
+    segment-table segment angle < 90°."""
     gdf, codes = load_gem_faults()
     assert len(gdf) == EXPECTED_ROWS
     assert (codes == 0).sum() == EXPECTED_SLIP_NAN
@@ -384,17 +385,20 @@ def test_real_gem_baselines():
     assert cosAB.min() > 0.0
     n_vertices = int(sum(len(g.coords) for g in gdf.geometry))
     assert len(A) + n_drop == n_vertices - EXPECTED_ROWS
-    # 顶点 154994（实证）→ 段 141298 + 零长剔除
     assert n_vertices == 154994
 
 
 @requires_gem
 def test_real_distance_cell_spotchecks():
-    """实源单胞任务抽检（内存护栏版）：2 胞 × {1°, 6′, 30″} 档、每档
-    随机 ≤600 像元对全段暴力路径分块比对（141k 段实源）。
+    """Real-source single-cell task spot checks (memory-guardrail version): 2 cells × {1°, 6′,
+    30″} tiers, each tier
+    comparing ≤600 random pixels against the brute-force all-segments path in chunks (real source
+    with 141k segments).
 
-    全档全像元位级一致性已由合成源测试覆盖（段数小可全比对）；本测试
-    只验引擎在实源候选规模下的正确性，抽样确定性（seed=13）。"""
+    Full-tier all-pixel bitwise consistency is already covered by the synthetic-source tests
+    (few segments allow full comparison); this test
+    only verifies the engine's correctness at the real-source candidate scale, with
+    deterministic sampling (seed=13)."""
     gdf, _codes = load_gem_faults()
     segs, _ = segment_table(list(gdf.geometry))
     rng = np.random.default_rng(13)
@@ -420,7 +424,7 @@ def test_real_distance_cell_spotchecks():
 
 @requires_gem
 def test_real_gem_sidecar_roundtrip(tmp_path):
-    """侧车 GeoParquet 往返：行数/属性列/编码列/几何/CRS/可见性。"""
+    """Sidecar GeoParquet round-trip: row count/attribute columns/encoding column/geometry/CRS/visibility."""
     import geopandas as gpd
     from cubebuild.sidecars import export_gem_active_faults
 
@@ -440,7 +444,6 @@ def test_real_gem_sidecar_roundtrip(tmp_path):
         SLIP_TYPE_CODES).fillna(0).astype("uint8")).all()
 
 
-# ---------------- e2e（合成源）：双通道入 store ----------------
 
 _E2E = """
 version: test
@@ -471,7 +474,7 @@ layers:
 
 
 def _synthetic_source(monkeypatch, n=36, seed=3):
-    """合成 GEM 源（少量线段，e2e 可在分钟级完成）注入 load_gem_faults。"""
+    """A synthetic GEM source (few segments, e2e completes in minutes) injected into load_gem_faults."""
     from shapely.geometry import LineString
 
     rng = np.random.default_rng(seed)
@@ -487,13 +490,12 @@ def _synthetic_source(monkeypatch, n=36, seed=3):
             pts.append((lon, lat))
         geoms.append(LineString(pts))
         slips.append(labels[k % len(labels)])
-    slips[0] = None          # 模拟 slip_type 缺失
+    slips[0] = None
     gdf = _fake_gdf(n, slips, geoms=geoms)
     monkeypatch.setattr(
         "cubebuild.faults.load_gem_faults", lambda _src=None: (gdf, np.array(
             [SLIP_TYPE_CODES.get(s, 0) for s in slips], dtype=np.uint8))
     )
-    # 侧车/保真走同源注入
     monkeypatch.setattr(
         "cubebuild.sidecars.load_gem_faults", lambda _src=None: (gdf, np.array(
             [SLIP_TYPE_CODES.get(s, 0) for s in slips], dtype=np.uint8))
@@ -502,8 +504,10 @@ def _synthetic_source(monkeypatch, n=36, seed=3):
 
 
 def test_faults_e2e(tmp_path, monkeypatch):
-    """合成源双通道全链路：build → 结构验证 PASS → manifest（编码表/
-    validity 链接/internal 可见性）→ 保真报告 PASS（距离抽样独立比对）。"""
+    """Synthetic-source dual-channel full chain: build → structural validation PASS → manifest
+    (encoding table/
+    validity link/internal visibility) → fidelity report PASS (independent distance-sampling
+    comparison)."""
     import cubebuild.cli
     from cubebuild.faults import build_faults_fidelity_report
     from cubebuild.manifest import read_manifest
@@ -533,7 +537,7 @@ def test_faults_e2e(tmp_path, monkeypatch):
 
     dist = entries[DISTANCE_LAYER_ID]
     assert dist["dtype"] == "float32" and dist["visibility"] == "internal"
-    assert dist["coverage"] == {"1deg": 1.0, "30sec": 1.0}   # 全域有值
+    assert dist["coverage"] == {"1deg": 1.0, "30sec": 1.0}
 
     import xarray as xr
     with xr.open_datatree(out, engine="zarr", chunks={}) as dt:
@@ -543,7 +547,6 @@ def test_faults_e2e(tmp_path, monkeypatch):
         m30 = dt["/30sec"][f"{SLIP_CLASS_LAYER_ID}__validity"].values
         assert np.array_equal(m30, (c30 != 0).astype(np.uint8))
 
-    # 保真：类别（逐位/众数/值域）+ 距离（抽样独立比对/全域有限）
     for lid in (SLIP_CLASS_LAYER_ID, DISTANCE_LAYER_ID):
         report = build_faults_fidelity_report(out, lid, ["1deg", "30sec"])
         assert report["result"] == "PASS", report["checks"]
